@@ -16,6 +16,7 @@ st.markdown("""
 <style>
 [data-testid="stMetricValue"] { font-size: 1.3rem; font-weight: 700; }
 .block-container { padding-top: 1.2rem; }
+table { width: 100%; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -35,47 +36,47 @@ with st.sidebar:
     gst_rate  = st.number_input("GST on charges (%)",       value=18,    min_value=0, step=1) / 100
     tds_rate  = st.number_input("TDS rate (%)",             value=0.095, min_value=0.0, step=0.001, format="%.3f") / 100
     tcs_rate  = st.number_input("TCS rate (%)",             value=0.477, min_value=0.0, step=0.001, format="%.3f") / 100
-    st.caption("TDS & TCS are applied on **Selling Price** (Invoice − GT Charge)")
+    st.caption("TDS & TCS deducted on **Selling Price** (Invoice − GT Charge)")
     st.markdown("---")
     st.markdown("""
 **Excel sheet layout:**
 - **Sheet 1** – Charges Description
-- **Sheet 2** – Category Description (SKU → sub-category)
-- **Sheet 3** – Price We Need (SKU → PWN)
+- **Sheet 2** – Category Description
+- **Sheet 3** – Price We Need (PWN)
 """)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CONSTANTS
 # ═══════════════════════════════════════════════════════════════════════════════
 CAT_MAP = {
-    "kurta":       "Kurta",
-    "top":         "Top",
-    "blouse":      "Blouse",
-    "trouser":     "Pant",
-    "dress":       "Dresses",
-    "night_suit":  "Nightsuit Sets",
-    "nightsuit":   "Nightsuit Sets",
-    "shirt":       "Men's shirt",
-    "kaftan":      "Kaftan",
-    "ethnic_set":  "Co-ords Set",
+    "kurta":      "Kurta",
+    "top":        "Top",
+    "blouse":     "Blouse",
+    "trouser":    "Pant",
+    "dress":      "Dresses",
+    "night_suit": "Nightsuit Sets",
+    "nightsuit":  "Nightsuit Sets",
+    "shirt":      "Men's shirt",
+    "kaftan":     "Kaftan",
+    "ethnic_set": "Co-ords Set",
 }
 
 SIZE_EXPAND = {
-    "L-XL":       ["L",   "XL"],
-    "S-M":        ["S",   "M"],
-    "XXL-3XL":    ["XXL", "3XL"],
-    "F-S/XXL":    ["F"],
-    "F-3xl/5xl":  ["F"],
-    "XS-S":       ["XS",  "S"],
-    "M-L":        ["M",   "L"],
-    "XL-XXL":     ["XL",  "XXL"],
-    "3XL-4XL":    ["3XL", "4XL"],
-    "5XL-6XL":    ["5XL", "6XL"],
-    "7XL-8XL":    ["7XL", "8XL"],
-    "4XL-5XL":    ["4XL", "5XL"],
-    "2XL-3XL":    ["2XL", "3XL"],
-    "XS-S-M":     ["XS",  "S",  "M"],
-    "L-XL-XXL":   ["L",   "XL", "XXL"],
+    "L-XL":      ["L",   "XL"],
+    "S-M":       ["S",   "M"],
+    "XXL-3XL":   ["XXL", "3XL"],
+    "F-S/XXL":   ["F"],
+    "F-3xl/5xl": ["F"],
+    "XS-S":      ["XS",  "S"],
+    "M-L":       ["M",   "L"],
+    "XL-XXL":    ["XL",  "XXL"],
+    "3XL-4XL":   ["3XL", "4XL"],
+    "5XL-6XL":   ["5XL", "6XL"],
+    "7XL-8XL":   ["7XL", "8XL"],
+    "4XL-5XL":   ["4XL", "5XL"],
+    "2XL-3XL":   ["2XL", "3XL"],
+    "XS-S-M":    ["XS",  "S",  "M"],
+    "L-XL-XXL":  ["L",   "XL", "XXL"],
 }
 
 ORDER_TO_PRICE_SIZE: dict = defaultdict(list)
@@ -87,7 +88,7 @@ for _ps, _os_list in SIZE_EXPAND.items():
 # HELPERS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def normalize_cat(raw: str) -> str:
+def normalize_cat(raw) -> str:
     if pd.isna(raw):
         return ""
     return CAT_MAP.get(str(raw).strip().lower(), str(raw).strip().title())
@@ -192,132 +193,180 @@ def run_reconciliation(order_df, charges_df, sku_cat_dict, pwn_dict,
         inv_amount = float(row.get("Invoice Amount", 0) or 0)
         quantity   = int(row.get("Quantity", 1) or 1)
 
-        # Category
         sub_cat_raw  = sku_cat_dict.get(sku.upper(), "")
         sub_cat_norm = normalize_cat(sub_cat_raw)
 
-        # ── Step 1 : GT Charge → Selling Price ────────────────────────
+        # Step 1 – GT Charge → Selling Price
         gt_charge  = get_gt_charge(sub_cat_norm, inv_amount, charges_df)
         sell_price = round(inv_amount - gt_charge, 2)
 
-        # ── Step 2 : Commission & Collection (on Selling Price) ────────
+        # Step 2 – Commission & Collection (on Selling Price)
         commission = get_commission(sub_cat_norm, sell_price, charges_df)
         coll_fee   = get_collection_fee(sub_cat_norm, sell_price, charges_df)
 
-        # ── Step 3 : Total Charges & GST ──────────────────────────────
+        # Step 3 – Total Charges & GST
         total_charges  = commission + coll_fee + float(fixed_fee)
-        gst_on_charges = round(total_charges * gst_rate, 5)
+        gst_on_charges = round(total_charges * gst_rate, 4)
 
-        # ── Step 4 : TDS & TCS (on Selling Price) ─────────────────────
+        # Step 4 – TDS & TCS (on Selling Price)
         tds_amount = round(sell_price * tds_rate, 4)
         tcs_amount = round(sell_price * tcs_rate, 4)
 
-        # ── Step 5 : Received Amount ───────────────────────────────────
-        # Selling Price − Total Charges − GST − TDS − TCS
-        received_amount = round(
-            sell_price - total_charges - gst_on_charges - tds_amount - tcs_amount, 2
+        # Step 5 – Total Deductions = Charges + GST + TDS + TCS  ← FIX
+        total_deductions = round(
+            total_charges + gst_on_charges + tds_amount + tcs_amount, 4
         )
 
-        # ── Step 6 : PWN lookup ────────────────────────────────────────
+        # Step 6 – Received Amount = Selling Price − All Deductions
+        received_amount = round(sell_price - total_deductions, 2)
+
+        # Step 7 – PWN lookup (direct → size-range → manual override)
         pwn_val, match_method = lookup_pwn(sku, pwn_dict)
         if sku.upper() in pwn_overrides:
-            pwn_val, match_method = pwn_overrides[sku.upper()], "manual"
+            pwn_val, match_method = float(pwn_overrides[sku.upper()]), "manual"
 
-        # ── Step 7 : Difference ────────────────────────────────────────
+        # Step 8 – Difference
         difference = round(received_amount - pwn_val, 2) if pd.notna(pwn_val) else np.nan
 
         rows_out.append({
-            "Order Id":             order_id,
-            "SKU":                  sku,
-            "Ordered On":           ordered_on,
-            "Category":             sub_cat_raw,
-            "Quantity":             quantity,
-            "Invoice Amount (₹)":   inv_amount,
-            "GT Charge (₹)":        gt_charge,
-            "Selling Price (₹)":    sell_price,
-            "Commission (₹)":       round(commission, 4),
-            "Collection Fee (₹)":   round(coll_fee, 4),
-            "Fixed Fee (₹)":        float(fixed_fee),
-            "Total Charges (₹)":    round(total_charges, 4),
-            "GST on Charges (₹)":   gst_on_charges,
-            "TDS (₹)":              tds_amount,
-            "TCS (₹)":              tcs_amount,
-            "Total Deductions (₹)": round(total_charges + gst_on_charges + tds_amount + tcs_amount, 4),
-            "Received Amount (₹)":  received_amount,
-            "PWN (₹)":              pwn_val,
-            "PWN Match":            match_method,
-            "Difference (₹)":       difference,
+            "Order Id":              order_id,
+            "SKU":                   sku,
+            "Ordered On":            ordered_on,
+            "Category":              sub_cat_raw,
+            "Qty":                   quantity,
+            "Invoice Amount":        inv_amount,
+            "GT Charge":             gt_charge,
+            "Selling Price":         sell_price,
+            "Commission":            round(commission, 4),
+            "Collection Fee":        round(coll_fee, 4),
+            "Fixed Fee":             float(fixed_fee),
+            "Total Charges":         round(total_charges, 4),
+            "GST on Charges":        gst_on_charges,
+            "TDS":                   tds_amount,
+            "TCS":                   tcs_amount,
+            "Total Deductions":      total_deductions,
+            "Received Amount":       received_amount,
+            "PWN":                   pwn_val,
+            "PWN Match":             match_method,
+            "Difference":            difference,
         })
 
     return pd.DataFrame(rows_out)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# EXCEL EXPORT
+# FORMATTING HELPERS  (NO matplotlib)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def to_excel_multi(recon_df: pd.DataFrame, summary_df: pd.DataFrame,
-                   charges_breakdown: pd.DataFrame) -> bytes:
-    """Export 3-sheet Excel: Reconciliation, Charges Summary, Category Breakdown."""
+MONEY_COLS = [
+    "Invoice Amount", "GT Charge", "Selling Price",
+    "Commission", "Collection Fee", "Fixed Fee",
+    "Total Charges", "GST on Charges", "TDS", "TCS",
+    "Total Deductions", "Received Amount", "PWN", "Difference",
+]
+
+def fmt_inr(x):
+    try:
+        if pd.isna(x):
+            return "—"
+        return f"₹{float(x):,.2f}"
+    except Exception:
+        return str(x)
+
+def style_table(df: pd.DataFrame, diff_col: str = "Difference") -> object:
+    """Apply ₹ formatting + red/green on diff col. No matplotlib needed."""
+    fmt_dict = {c: fmt_inr for c in df.columns if c in MONEY_COLS}
+
+    def colour_diff(val):
+        try:
+            v = float(val)
+            if v < 0:  return "color: red; font-weight: bold"
+            if v > 0:  return "color: green; font-weight: bold"
+        except Exception:
+            pass
+        return ""
+
+    styler = df.style.format(fmt_dict)
+    if diff_col in df.columns:
+        styler = styler.applymap(colour_diff, subset=[diff_col])
+    return styler
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# EXCEL EXPORT  (3 sheets)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def to_excel(recon_df: pd.DataFrame, summary_df: pd.DataFrame,
+             cat_df: pd.DataFrame) -> bytes:
     buf = BytesIO()
-    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-        for df, sheet in [
-            (recon_df,          "Reconciliation"),
-            (charges_breakdown, "Charges Breakdown"),
-            (summary_df,        "Charges Summary"),
-        ]:
-            df.to_excel(writer, index=False, sheet_name=sheet)
-            ws = writer.sheets[sheet]
+    with pd.ExcelWriter(buf, engine="openpyxl") as w:
+        for df, sheet in [(recon_df, "Reconciliation"),
+                          (cat_df,   "Category Breakdown"),
+                          (summary_df, "Charges Summary")]:
+            df.to_excel(w, index=False, sheet_name=sheet)
+            ws = w.sheets[sheet]
             for col_cells in ws.columns:
-                max_len = max((len(str(c.value or "")) for c in col_cells), default=10)
-                ws.column_dimensions[col_cells[0].column_letter].width = min(max_len + 3, 38)
+                width = max(len(str(c.value or "")) for c in col_cells)
+                ws.column_dimensions[col_cells[0].column_letter].width = min(width + 3, 38)
     return buf.getvalue()
 
 
-def build_charges_summary(result_df: pd.DataFrame) -> tuple:
-    """
-    Returns (summary_totals_df, category_breakdown_df).
-    """
-    # ── Grand total row ───────────────────────────────────────────────
-    num_cols = [
-        "Invoice Amount (₹)", "GT Charge (₹)", "Selling Price (₹)",
-        "Commission (₹)", "Collection Fee (₹)", "Fixed Fee (₹)",
-        "Total Charges (₹)", "GST on Charges (₹)",
-        "TDS (₹)", "TCS (₹)", "Total Deductions (₹)",
-        "Received Amount (₹)", "Difference (₹)",
+# ═══════════════════════════════════════════════════════════════════════════════
+# SUMMARY BUILDERS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def build_summary(df: pd.DataFrame) -> tuple:
+    """Returns (grand_summary_df, category_breakdown_df)."""
+    # Grand summary
+    totals = {
+        "Metric": [], "Value": [],
+    }
+    fields = [
+        ("Total Orders",             len(df)),
+        ("Total Invoice Amount",     df["Invoice Amount"].sum()),
+        ("Total GT Charges",         df["GT Charge"].sum()),
+        ("Total Selling Price",      df["Selling Price"].sum()),
+        ("Total Commission",         df["Commission"].sum()),
+        ("Total Collection Fee",     df["Collection Fee"].sum()),
+        ("Total Fixed Fee",          df["Fixed Fee"].sum()),
+        ("Total Charges (C+F+Fixed)",df["Total Charges"].sum()),
+        ("Total GST on Charges",     df["GST on Charges"].sum()),
+        ("Total TDS",                df["TDS"].sum()),
+        ("Total TCS",                df["TCS"].sum()),
+        ("Total Deductions",         df["Total Deductions"].sum()),
+        ("Total Received Amount",    df["Received Amount"].sum()),
+        ("Net Difference vs PWN",    df["Difference"].sum()),
+        ("Orders with -ve Diff",     int((df["Difference"] < 0).sum())),
+        ("Orders with +ve Diff",     int((df["Difference"] > 0).sum())),
+        ("Orders – No PWN found",    int(df["Difference"].isna().sum())),
+        ("Avg Received per Order",   df["Received Amount"].mean()),
+        ("Avg Difference per Order", df["Difference"].mean()),
     ]
-    totals = {c: result_df[c].sum() for c in num_cols if c in result_df.columns}
-    totals["Orders"] = len(result_df)
-    totals["Avg Received per Order"] = round(result_df["Received Amount (₹)"].mean(), 2)
-    totals["Avg Difference per Order"] = round(result_df["Difference (₹)"].mean(), 2)
-    totals["Orders with -ve Diff"] = int((result_df["Difference (₹)"] < 0).sum())
-    totals["Orders with +ve Diff"] = int((result_df["Difference (₹)"] > 0).sum())
-    totals["Orders with no PWN"]   = int(result_df["Difference (₹)"].isna().sum())
+    for label, val in fields:
+        totals["Metric"].append(label)
+        totals["Value"].append(round(val, 2) if isinstance(val, float) else val)
 
-    summary_df = pd.DataFrame([
-        {"Metric": k, "Value": round(v, 2) if isinstance(v, float) else v}
-        for k, v in totals.items()
-    ])
+    summary_df = pd.DataFrame(totals)
 
-    # ── Category breakdown ────────────────────────────────────────────
+    # Category breakdown
     cat_df = (
-        result_df.groupby("Category")
+        df.groupby("Category")
         .agg(
-            Orders           = ("Order Id",             "count"),
-            Invoice_Total    = ("Invoice Amount (₹)",    "sum"),
-            GT_Total         = ("GT Charge (₹)",         "sum"),
-            Selling_Total    = ("Selling Price (₹)",      "sum"),
-            Commission_Total = ("Commission (₹)",         "sum"),
-            Collection_Total = ("Collection Fee (₹)",     "sum"),
-            FixedFee_Total   = ("Fixed Fee (₹)",          "sum"),
-            TotalCharges     = ("Total Charges (₹)",      "sum"),
-            GST_Total        = ("GST on Charges (₹)",     "sum"),
-            TDS_Total        = ("TDS (₹)",                "sum"),
-            TCS_Total        = ("TCS (₹)",                "sum"),
-            Deductions_Total = ("Total Deductions (₹)",   "sum"),
-            Received_Total   = ("Received Amount (₹)",    "sum"),
-            NetDiff          = ("Difference (₹)",         "sum"),
-            AvgDiff          = ("Difference (₹)",         "mean"),
+            Orders          = ("Order Id",          "count"),
+            Invoice_Total   = ("Invoice Amount",     "sum"),
+            GT_Total        = ("GT Charge",          "sum"),
+            Selling_Total   = ("Selling Price",      "sum"),
+            Commission      = ("Commission",         "sum"),
+            Collection      = ("Collection Fee",     "sum"),
+            Fixed           = ("Fixed Fee",          "sum"),
+            Total_Charges   = ("Total Charges",      "sum"),
+            GST_Total       = ("GST on Charges",     "sum"),
+            TDS_Total       = ("TDS",                "sum"),
+            TCS_Total       = ("TCS",                "sum"),
+            Deductions      = ("Total Deductions",   "sum"),
+            Received_Total  = ("Received Amount",    "sum"),
+            Net_Diff        = ("Difference",         "sum"),
+            Avg_Diff        = ("Difference",         "mean"),
         )
         .reset_index()
         .sort_values("Invoice_Total", ascending=False)
@@ -325,7 +374,7 @@ def build_charges_summary(result_df: pd.DataFrame) -> tuple:
     )
     cat_df.columns = [
         "Category", "Orders", "Invoice Total", "GT Total", "Selling Total",
-        "Commission Total", "Collection Total", "Fixed Fee Total",
+        "Commission", "Collection", "Fixed Fee",
         "Total Charges", "GST Total", "TDS Total", "TCS Total",
         "Total Deductions", "Received Total", "Net Difference", "Avg Difference",
     ]
@@ -335,9 +384,14 @@ def build_charges_summary(result_df: pd.DataFrame) -> tuple:
 # ═══════════════════════════════════════════════════════════════════════════════
 # SESSION STATE
 # ═══════════════════════════════════════════════════════════════════════════════
-for k, v in [("pwn_overrides", {}), ("result_df", None),
-             ("charges_df", None), ("sku_cat_dict", None),
-             ("pwn_dict", None), ("order_df", None)]:
+for k, v in [
+    ("pwn_overrides", {}),
+    ("result_df", None),
+    ("charges_df", None),
+    ("sku_cat_dict", None),
+    ("pwn_dict", None),
+    ("order_df", None),
+]:
     if k not in st.session_state:
         st.session_state[k] = v
 
@@ -352,7 +406,7 @@ if order_file and charges_file:
         xl       = pd.read_excel(charges_file, sheet_name=None, header=None)
         sheets   = list(xl.values())
         if len(sheets) < 3:
-            st.error("❌ Excel workbook must have at least 3 sheets.")
+            st.error("❌ Excel must have at least 3 sheets.")
             st.stop()
         charges_df   = parse_charges_df(sheets[0])
         sku_cat_dict = parse_sku_cat(sheets[1])
@@ -362,14 +416,14 @@ if order_file and charges_file:
             "pwn_dict": pwn_dict, "order_df": order_df,
         })
 
+    # Run
     result_df = run_reconciliation(
         order_df, charges_df, sku_cat_dict, pwn_dict,
         fixed_fee, gst_rate, tds_rate, tcs_rate,
         pwn_overrides=st.session_state["pwn_overrides"],
     )
     st.session_state["result_df"] = result_df
-
-    summary_df, cat_breakdown_df = build_charges_summary(result_df)
+    summary_df, cat_df = build_summary(result_df)
 
     st.success(f"✅ Processed **{len(result_df):,}** orders")
 
@@ -385,26 +439,39 @@ if order_file and charges_file:
     # ╚══════════════════════════════════════════════════════════════════╝
     with tab1:
 
-        # ── PWN Not-Found editor ─────────────────────────────────────
+        # ── PWN Not-Found editor (FIXED UI) ──────────────────────────
         missing_df = result_df[result_df["PWN Match"] == "not_found"]
         if len(missing_df):
             with st.expander(
-                f"⚠️  **{len(missing_df)} order(s) — PWN price not found** — click to enter manually",
+                f"⚠️  **{len(missing_df)} SKU(s) have no PWN price — click to enter manually**",
                 expanded=True,
             ):
-                st.markdown("Enter the correct PWN for each SKU, then click **Save & Recalculate**.")
-                missing_skus    = missing_df["SKU"].unique().tolist()
+                st.info(
+                    "Each row below shows the full SKU name. "
+                    "Enter the correct PWN value and click **Save & Recalculate**."
+                )
+                missing_skus = missing_df["SKU"].unique().tolist()
                 override_inputs = {}
-                n_cols = min(len(missing_skus), 4)
-                cols   = st.columns(n_cols)
-                for i, sku in enumerate(missing_skus):
-                    existing = st.session_state["pwn_overrides"].get(sku.upper(), 0.0)
-                    override_inputs[sku] = cols[i % n_cols].number_input(
-                        f"PWN – **{sku}**",
-                        value=float(existing), min_value=0.0, step=0.5,
+
+                # Table-like layout: SKU label on left, number input on right
+                for sku in missing_skus:
+                    c_label, c_input = st.columns([3, 2])
+                    c_label.markdown(
+                        f"<div style='padding-top:8px;font-size:0.95rem;"
+                        f"word-break:break-all'><b>{sku}</b></div>",
+                        unsafe_allow_html=True,
+                    )
+                    existing = float(st.session_state["pwn_overrides"].get(sku.upper(), 0.0))
+                    override_inputs[sku] = c_input.number_input(
+                        "PWN (₹)",
+                        value=existing,
+                        min_value=0.0,
+                        step=0.5,
+                        label_visibility="collapsed",
                         key=f"pwn_input_{sku}",
                     )
-                if st.button("💾 Save PWN Overrides & Recalculate", type="primary"):
+
+                if st.button("💾  Save PWN Overrides & Recalculate", type="primary"):
                     for sku, val in override_inputs.items():
                         if val > 0:
                             st.session_state["pwn_overrides"][sku.upper()] = val
@@ -414,20 +481,21 @@ if order_file and charges_file:
                         pwn_overrides=st.session_state["pwn_overrides"],
                     )
                     st.session_state["result_df"] = result_df
-                    st.success("✅ Overrides saved — reconciliation updated!")
+                    summary_df, cat_df = build_summary(result_df)
+                    st.success("✅ Saved and recalculated!")
                     st.rerun()
 
-        # ── KPI Cards ────────────────────────────────────────────────
+        # ── KPI strip ────────────────────────────────────────────────
         st.markdown("### 📊 Summary")
         k1,k2,k3,k4,k5,k6,k7,k8 = st.columns(8)
         k1.metric("Orders",            f"{len(result_df):,}")
-        k2.metric("Invoice Total",     f"₹{result_df['Invoice Amount (₹)'].sum():,.0f}")
-        k3.metric("Selling Pr. Total", f"₹{result_df['Selling Price (₹)'].sum():,.0f}")
-        k4.metric("Total Charges",     f"₹{result_df['Total Charges (₹)'].sum():,.0f}")
-        k5.metric("GST Total",         f"₹{result_df['GST on Charges (₹)'].sum():,.0f}")
-        k6.metric("TDS + TCS Total",   f"₹{result_df['TDS (₹)'].sum() + result_df['TCS (₹)'].sum():,.1f}")
-        k7.metric("Received Total",    f"₹{result_df['Received Amount (₹)'].sum():,.0f}")
-        net = result_df['Difference (₹)'].sum()
+        k2.metric("Invoice Total",     f"₹{result_df['Invoice Amount'].sum():,.0f}")
+        k3.metric("Selling Pr. Total", f"₹{result_df['Selling Price'].sum():,.0f}")
+        k4.metric("Total Charges",     f"₹{result_df['Total Charges'].sum():,.0f}")
+        k5.metric("GST Total",         f"₹{result_df['GST on Charges'].sum():,.0f}")
+        k6.metric("TDS + TCS",         f"₹{(result_df['TDS']+result_df['TCS']).sum():,.1f}")
+        k7.metric("Received Total",    f"₹{result_df['Received Amount'].sum():,.0f}")
+        net = result_df["Difference"].sum()
         k8.metric(
             "Net Difference",
             f"₹{net:,.2f}",
@@ -450,13 +518,13 @@ if order_file and charges_file:
         if sel_cat != "All":
             view = view[view["Category"] == sel_cat]
         if diff_opt == "Positive (+)":
-            view = view[view["Difference (₹)"] > 0]
+            view = view[view["Difference"] > 0]
         elif diff_opt == "Negative (−)":
-            view = view[view["Difference (₹)"] < 0]
+            view = view[view["Difference"] < 0]
         elif diff_opt == "Zero / Matched":
-            view = view[view["Difference (₹)"] == 0]
+            view = view[view["Difference"] == 0]
         elif diff_opt == "No PWN data":
-            view = view[view["Difference (₹)"].isna()]
+            view = view[view["Difference"].isna()]
         if search.strip():
             mask = (
                 view["SKU"].str.contains(search.strip(), case=False, na=False) |
@@ -468,47 +536,31 @@ if order_file and charges_file:
 
         display_cols = [
             "Order Id", "SKU", "Ordered On", "Category",
-            "Invoice Amount (₹)", "GT Charge (₹)", "Selling Price (₹)",
-            "Commission (₹)", "Collection Fee (₹)", "Fixed Fee (₹)",
-            "Total Charges (₹)", "GST on Charges (₹)",
-            "TDS (₹)", "TCS (₹)", "Total Deductions (₹)",
-            "Received Amount (₹)", "PWN (₹)", "Difference (₹)", "PWN Match",
+            "Invoice Amount", "GT Charge", "Selling Price",
+            "Commission", "Collection Fee", "Fixed Fee",
+            "Total Charges", "GST on Charges",
+            "TDS", "TCS", "Total Deductions",
+            "Received Amount", "PWN", "Difference", "PWN Match",
         ]
 
-        money_cols = [c for c in display_cols if "₹" in c]
-
-        def colour_diff(val):
-            try:
-                v = float(val)
-                if v < 0: return "color:red;font-weight:bold"
-                if v > 0: return "color:green;font-weight:bold"
-            except Exception:
-                pass
-            return ""
-
-        fmt_inr = lambda x: f"₹{x:.2f}" if pd.notna(x) else "—"
-
-        styled = (
-            view[display_cols]
-            .style
-            .applymap(colour_diff, subset=["Difference (₹)"])
-            .format({c: fmt_inr for c in money_cols})
+        st.dataframe(
+            style_table(view[display_cols], diff_col="Difference"),
+            use_container_width=True,
+            height=500,
         )
-        st.dataframe(styled, use_container_width=True, height=500)
 
         # ── Downloads ────────────────────────────────────────────────
         st.markdown("### 📥 Download")
-        d1, d2, d3 = st.columns(3)
+        d1, d2 = st.columns(2)
         d1.download_button(
-            "⬇  Full Reconciliation (Excel)",
-            data=to_excel_multi(result_df, summary_df, cat_breakdown_df),
+            "⬇  Full Reconciliation (Excel – 3 sheets)",
+            data=to_excel(result_df, summary_df, cat_df),
             file_name="flipkart_reconciliation.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
         d2.download_button(
             "⬇  Filtered View (Excel)",
-            data=to_excel_multi(view[display_cols].reset_index(drop=True),
-                                summary_df, cat_breakdown_df),
+            data=to_excel(view[display_cols].reset_index(drop=True), summary_df, cat_df),
             file_name="flipkart_reconciliation_filtered.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
@@ -518,67 +570,63 @@ if order_file and charges_file:
     # ╚══════════════════════════════════════════════════════════════════╝
     with tab2:
         st.markdown("### 💰 Total Charges Summary")
-        st.caption("Grand total of every charge component across all orders")
+        st.caption("Grand total of every deduction across all orders")
 
-        # ── Big metrics ──────────────────────────────────────────────
         col_a, col_b = st.columns(2)
 
         with col_a:
-            st.markdown("#### 📤 What Flipkart Deducts")
-            r1, r2 = st.columns(2)
-            r1.metric("GT Charges Total",       f"₹{result_df['GT Charge (₹)'].sum():,.2f}")
-            r2.metric("Commission Total",        f"₹{result_df['Commission (₹)'].sum():,.2f}")
-            r1.metric("Collection Fee Total",    f"₹{result_df['Collection Fee (₹)'].sum():,.2f}")
-            r2.metric("Fixed Fee Total",         f"₹{result_df['Fixed Fee (₹)'].sum():,.2f}")
-            r1.metric("GST on Charges Total",    f"₹{result_df['GST on Charges (₹)'].sum():,.2f}")
-            r2.metric("TDS Total",               f"₹{result_df['TDS (₹)'].sum():,.2f}")
-            r1.metric("TCS Total",               f"₹{result_df['TCS (₹)'].sum():,.2f}")
-            r2.metric("Total Deductions",
-                      f"₹{result_df['Total Deductions (₹)'].sum():,.2f}",
-                      delta="All deductions combined")
+            st.markdown("#### 📤 Flipkart Deductions")
+            a1, a2 = st.columns(2)
+            a1.metric("GT Charges",        f"₹{result_df['GT Charge'].sum():,.2f}")
+            a2.metric("Commission",         f"₹{result_df['Commission'].sum():,.2f}")
+            a1.metric("Collection Fee",     f"₹{result_df['Collection Fee'].sum():,.2f}")
+            a2.metric("Fixed Fee",          f"₹{result_df['Fixed Fee'].sum():,.2f}")
+            a1.metric("GST on Charges",     f"₹{result_df['GST on Charges'].sum():,.2f}")
+            a2.metric("TDS",                f"₹{result_df['TDS'].sum():,.2f}")
+            a1.metric("TCS",                f"₹{result_df['TCS'].sum():,.2f}")
+
+            total_ded = result_df["Total Deductions"].sum()
+            st.metric(
+                "🔴 Total Deductions (all above)",
+                f"₹{total_ded:,.2f}",
+            )
 
         with col_b:
             st.markdown("#### 📥 What You Receive")
-            r3, r4 = st.columns(2)
-            r3.metric("Total Invoice Amount",   f"₹{result_df['Invoice Amount (₹)'].sum():,.2f}")
-            r4.metric("Total Selling Price",    f"₹{result_df['Selling Price (₹)'].sum():,.2f}")
-            r3.metric("Total Received Amount",  f"₹{result_df['Received Amount (₹)'].sum():,.2f}")
-            net = result_df['Difference (₹)'].sum()
-            r4.metric(
-                "Net Difference vs PWN",
+            b1, b2 = st.columns(2)
+            b1.metric("Total Invoice",      f"₹{result_df['Invoice Amount'].sum():,.2f}")
+            b2.metric("Total Selling Pr.",  f"₹{result_df['Selling Price'].sum():,.2f}")
+            b1.metric("Total Received",     f"₹{result_df['Received Amount'].sum():,.2f}")
+            net = result_df["Difference"].sum()
+            b2.metric(
+                "Net Diff vs PWN",
                 f"₹{net:,.2f}",
                 delta=f"{'▲' if net>=0 else '▼'} {abs(net):,.2f}",
                 delta_color="normal" if net >= 0 else "inverse",
             )
-            r3.metric("Orders with -ve Diff",
-                      int((result_df["Difference (₹)"] < 0).sum()))
-            r4.metric("Orders with +ve Diff",
-                      int((result_df["Difference (₹)"] > 0).sum()))
+            b1.metric("Orders –ve Diff",    int((result_df["Difference"] < 0).sum()))
+            b2.metric("Orders +ve Diff",    int((result_df["Difference"] > 0).sum()))
 
         st.markdown("---")
 
-        # ── Detailed charges table ────────────────────────────────────
+        # Per-order charges table (NO background_gradient = no matplotlib crash)
         st.markdown("#### 📋 Per-Order Charges Detail")
-        charges_view_cols = [
+        charge_cols = [
             "Order Id", "SKU", "Category",
-            "Invoice Amount (₹)", "GT Charge (₹)", "Selling Price (₹)",
-            "Commission (₹)", "Collection Fee (₹)", "Fixed Fee (₹)",
-            "Total Charges (₹)", "GST on Charges (₹)",
-            "TDS (₹)", "TCS (₹)", "Total Deductions (₹)",
-            "Received Amount (₹)",
+            "Invoice Amount", "GT Charge", "Selling Price",
+            "Commission", "Collection Fee", "Fixed Fee",
+            "Total Charges", "GST on Charges",
+            "TDS", "TCS", "Total Deductions",
+            "Received Amount",
         ]
-        charges_money = [c for c in charges_view_cols if "₹" in c]
-        charges_styled = (
-            result_df[charges_view_cols]
-            .style
-            .format({c: fmt_inr for c in charges_money})
-            .background_gradient(subset=["Total Deductions (₹)"], cmap="Reds")
+        st.dataframe(
+            style_table(result_df[charge_cols]),
+            use_container_width=True,
+            height=480,
         )
-        st.dataframe(charges_styled, use_container_width=True, height=480)
 
-        # ── Charges summary card (all as one table) ───────────────────
         st.markdown("---")
-        st.markdown("#### 🧾 Charges Summary Table")
+        st.markdown("#### 🧾 Grand Summary Table")
         st.dataframe(summary_df, use_container_width=True)
 
     # ╔══════════════════════════════════════════════════════════════════╗
@@ -586,39 +634,27 @@ if order_file and charges_file:
     # ╚══════════════════════════════════════════════════════════════════╝
     with tab3:
         st.markdown("### 📊 Category-wise Breakdown")
-        st.caption("Every charge component summed per category")
+        st.caption("Every charge component summed per product category")
 
-        # colour net diff
-        def colour_net(val):
-            try:
-                v = float(val)
-                if v < 0: return "color:red;font-weight:bold"
-                if v > 0: return "color:green;font-weight:bold"
-            except Exception:
-                pass
-            return ""
-
-        cat_money_cols = [c for c in cat_breakdown_df.columns if c not in ("Category", "Orders")]
-        cat_styled = (
-            cat_breakdown_df
-            .style
-            .applymap(colour_net, subset=["Net Difference", "Avg Difference"])
-            .format({c: "₹{:.2f}" for c in cat_money_cols})
+        cat_money = [c for c in cat_df.columns if c not in ("Category", "Orders")]
+        st.dataframe(
+            style_table(cat_df, diff_col="Net Difference")
+            .format({c: "₹{:.2f}" for c in cat_money}),
+            use_container_width=True,
         )
-        st.dataframe(cat_styled, use_container_width=True)
 
         st.markdown("---")
-        st.markdown("#### 🔢 Charge Components by Category (stacked view)")
-        charge_comp_df = cat_breakdown_df[[
+        st.markdown("#### 🔢 Charge Components Only (per Category)")
+        comp_cols = [
             "Category", "Orders",
-            "GT Total", "Commission Total", "Collection Total",
-            "Fixed Fee Total", "GST Total", "TDS Total", "TCS Total",
-            "Total Deductions",
-        ]].copy()
+            "GT Total", "Commission", "Collection", "Fixed Fee",
+            "GST Total", "TDS Total", "TCS Total", "Total Deductions",
+        ]
+        comp_money = [c for c in comp_cols if c not in ("Category", "Orders")]
         st.dataframe(
-            charge_comp_df.style.format(
-                {c: "₹{:.2f}" for c in charge_comp_df.columns if c not in ("Category","Orders")}
-            ).background_gradient(subset=["Total Deductions"], cmap="YlOrRd"),
+            cat_df[comp_cols].style.format(
+                {c: "₹{:.2f}" for c in comp_money}
+            ),
             use_container_width=True,
         )
 
@@ -631,33 +667,34 @@ else:
 ---
 ### How it works
 
-| Step | File | Used columns |
-|------|------|-------------|
-| 1 | **Order CSV** | `Order Id`, `SKU`, `Ordered On`, `Invoice Amount`, `Quantity` |
-| 2 | **Data Excel** | 3-sheet workbook: Charges / Category / Price We Need |
+| File | Description |
+|------|-------------|
+| **Order CSV** | Flipkart Seller Hub export — uses `Order Id`, `SKU`, `Ordered On`, `Invoice Amount`, `Quantity` |
+| **Data Excel** | 3-sheet workbook: Charges Description / Category Description / Price We Need |
 
 ---
 ### Calculation per order
 
 ```
-GT Charge       = fixed slab  (based on Invoice Amount)
-Selling Price   = Invoice Amount − GT Charge
+GT Charge        = fixed slab  (looked up by Invoice Amount)
+Selling Price    = Invoice Amount − GT Charge
 
-Commission      = Selling Price × Commission %   (slab by Selling Price)
-Collection Fee  = Selling Price × Collection %   (slab by Selling Price)
-Total Charges   = Commission + Collection Fee + Fixed Fee
+Commission       = Selling Price × Commission %   (slab by Selling Price)
+Collection Fee   = Selling Price × Collection %   (slab by Selling Price)
+Total Charges    = Commission + Collection Fee + Fixed Fee
 
-GST Amount      = Total Charges × 18 %
-TDS             = Selling Price × 0.095 %
-TCS             = Selling Price × 0.477 %
+GST Amount       = Total Charges × 18%
+TDS              = Selling Price × 0.095%
+TCS              = Selling Price × 0.477%
 
-Received Amount = Selling Price − Total Charges − GST − TDS − TCS
+Total Deductions = Total Charges + GST + TDS + TCS
+Received Amount  = Selling Price − Total Deductions
 
-Difference      = Received Amount − PWN
+Difference       = Received Amount − PWN
 ```
 
-**Three tabs:**
-- **Reconciliation** — order-level detail with filters & download
-- **Charges Summary** — grand totals for every charge component
-- **Category Breakdown** — all charges grouped by product category
+**PWN lookup:** tries exact SKU first, then auto-maps combined sizes  
+(e.g. order SKU `7053YKBLS-L` → matches price sheet `7053YKBLS-L-XL`)
+
+If a PWN is still missing, an editor appears to enter it manually.
 """)
