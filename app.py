@@ -226,15 +226,21 @@ def run_reconciliation(order_df, charges_df, sku_cat_dict, pwn_dict,
         quantity   = int(row.get("Quantity", 1) or 1)
 
         sub_cat_raw  = sku_cat_dict.get(sku.upper(), "")
-        sub_cat_norm = normalize_cat(sub_cat_raw)
+        # FIX: charge lookups use sub_cat_raw (the exact name stored in the
+        # charges sheet, e.g. "ethnic_set") NOT the normalized display name
+        # (e.g. "Co-ords Set"). Previously normalize_cat mapped ethnic_set →
+        # Co-ords Set, so the lookup found Co-ords Set (21%) in the charges
+        # sheet instead of ethnic_set (14%), producing wrong commission.
+        # normalize_cat is still used only for the display "Category" column.
+        sub_cat_norm = normalize_cat(sub_cat_raw)   # display name only
 
-        # Step 1 – GT Charge → Selling Price
-        gt_charge  = get_gt_charge(sub_cat_norm, inv_amount, charges_df)
+        # Step 1 – GT Charge → Selling Price  (use raw name for lookup)
+        gt_charge  = get_gt_charge(sub_cat_raw, inv_amount, charges_df)
         sell_price = round(inv_amount - gt_charge, 2)
 
-        # Step 2 – Commission & Collection (on Selling Price)
-        commission = get_commission(sub_cat_norm, sell_price, charges_df)
-        coll_fee   = get_collection_fee(sub_cat_norm, sell_price, charges_df)
+        # Step 2 – Commission & Collection (use raw name for lookup)
+        commission = get_commission(sub_cat_raw, sell_price, charges_df)
+        coll_fee   = get_collection_fee(sub_cat_raw, sell_price, charges_df)
 
         # Step 3 – Total Charges & GST
         total_charges  = commission + coll_fee + float(fixed_fee)
