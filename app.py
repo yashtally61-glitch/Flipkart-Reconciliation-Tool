@@ -84,9 +84,30 @@ for _ps, _os_list in SIZE_EXPAND.items():
     for _os in _os_list:
         ORDER_TO_PRICE_SIZE[_os.upper()].append(_ps)
 
+# ── FIX: Vendor prefixes Flipkart prepends to seller SKUs in order exports ──
+# e.g. "GWN-1369YKMAROON-7XL" → stripped to "1369YKMAROON-7XL" for lookups.
+# Add more prefixes here if Flipkart introduces new ones.
+VENDOR_PREFIXES = ["GWN-", "GWN_"]
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # HELPERS
 # ═══════════════════════════════════════════════════════════════════════════════
+
+def strip_vendor_prefix(sku: str) -> str:
+    """
+    Strip known Flipkart vendor prefixes from a SKU before lookup.
+
+    Flipkart order exports sometimes prepend a vendor code (e.g. 'GWN-') to
+    the seller SKU. The category and PWN sheets store only the bare SKU, so
+    lookups silently fail — returning empty category and no PWN — without this
+    step. The original raw SKU is still displayed in the results table.
+    """
+    upper = sku.upper()
+    for prefix in VENDOR_PREFIXES:
+        if upper.startswith(prefix.upper()):
+            return sku[len(prefix):]
+    return sku
+
 
 def normalize_cat(raw) -> str:
     if pd.isna(raw):
@@ -115,7 +136,11 @@ def get_gt_charge(cat_norm: str, inv: float, cdf: pd.DataFrame) -> float:
     for _, r in rows.iterrows():
         lo, hi, gtv = r.get("GT Lower Lim."), r.get("GT Upper Lim."), r.get("GT Charge")
         if pd.notna(lo) and pd.notna(hi) and pd.notna(gtv):
-            if float(lo) <= inv <= float(hi):
+            # FIX: The Excel slabs use whole-number boundaries (e.g. 0–1000,
+            # 1001–∞). Any fractional invoice amount between 1000.01–1000.99
+            # fell in the gap and returned 0. Adding +0.99 to the upper bound
+            # closes the gap without ever overlapping the next slab's lower.
+            if float(lo) <= inv <= float(hi) + 0.99:
                 return float(gtv)
     return 0.0
 
@@ -125,7 +150,11 @@ def get_commission(cat_norm: str, sell: float, cdf: pd.DataFrame) -> float:
     for _, r in rows.iterrows():
         lo, hi, ch = r.get("Lower Lim."), r.get("Upper Lim."), r.get("Charge")
         if pd.notna(lo) and pd.notna(hi) and pd.notna(ch):
-            if float(lo) <= sell <= float(hi):
+            # FIX: same slab-gap fix as get_gt_charge.
+            # Kurta slabs: 0–1000 = 0%, 1001–∞ = 9%.
+            # A selling price of e.g. 1000.50 matched neither slab before,
+            # returning 0% commission incorrectly. +0.99 closes the gap.
+            if float(lo) <= sell <= float(hi) + 0.99:
                 return float(ch) * sell
     return 0.0
 
@@ -139,7 +168,8 @@ def get_collection_fee(cat_norm: str, sell: float, cdf: pd.DataFrame) -> float:
         if pd.isna(hi) or pd.isna(cf):
             continue
         lo_val = 0.0 if (pd.isna(lo_raw) or str(lo_raw).startswith(">")) else float(lo_raw)
-        if lo_val < sell <= float(hi):
+        # FIX: same +0.99 slab-gap fix applied to collection fee upper bound.
+        if lo_val < sell <= float(hi) + 0.99:
             return float(cf) * sell
     return 0.0
 
@@ -187,7 +217,9 @@ def run_reconciliation(order_df, charges_df, sku_cat_dict, pwn_dict,
     rows_out = []
 
     for _, row in order_df.iterrows():
-        sku        = str(row.get("SKU", "")).strip()
+        raw_sku    = str(row.get("SKU", "")).strip()
+        # FIX: strip vendor prefix before any lookup; keep raw_sku for display
+        sku        = strip_vendor_prefix(raw_sku)
         order_id   = str(row.get("Order Id", "")).strip()
         ordered_on = row.get("Ordered On", "")
         inv_amount = float(row.get("Invoice Amount", 0) or 0)
@@ -212,7 +244,7 @@ def run_reconciliation(order_df, charges_df, sku_cat_dict, pwn_dict,
         tds_amount = round(sell_price * tds_rate, 4)
         tcs_amount = round(sell_price * tcs_rate, 4)
 
-        # Step 5 – Total Deductions = Charges + GST + TDS + TCS  ← FIX
+        # Step 5 – Total Deductions = Charges + GST + TDS + TCS
         total_deductions = round(
             total_charges + gst_on_charges + tds_amount + tcs_amount, 4
         )
@@ -230,7 +262,8 @@ def run_reconciliation(order_df, charges_df, sku_cat_dict, pwn_dict,
 
         rows_out.append({
             "Order Id":              order_id,
-            "SKU":                   sku,
+            "SKU":                   raw_sku,    # original SKU from Flipkart (may have prefix)
+            "Lookup SKU":            sku,         # cleaned SKU used for all lookups
             "Ordered On":            ordered_on,
             "Category":              sub_cat_raw,
             "Qty":                   quantity,
@@ -317,10 +350,7 @@ def to_excel(recon_df: pd.DataFrame, summary_df: pd.DataFrame,
 
 def build_summary(df: pd.DataFrame) -> tuple:
     """Returns (grand_summary_df, category_breakdown_df)."""
-    # Grand summary
-    totals = {
-        "Metric": [], "Value": [],
-    }
+    totals = {"Metric": [], "Value": []}
     fields = [
         ("Total Orders",             len(df)),
         ("Total Invoice Amount",     df["Invoice Amount"].sum()),
@@ -348,7 +378,6 @@ def build_summary(df: pd.DataFrame) -> tuple:
 
     summary_df = pd.DataFrame(totals)
 
-    # Category breakdown
     cat_df = (
         df.groupby("Category")
         .agg(
@@ -416,7 +445,6 @@ if order_file and charges_file:
             "pwn_dict": pwn_dict, "order_df": order_df,
         })
 
-    # Run
     result_df = run_reconciliation(
         order_df, charges_df, sku_cat_dict, pwn_dict,
         fixed_fee, gst_rate, tds_rate, tcs_rate,
@@ -427,7 +455,6 @@ if order_file and charges_file:
 
     st.success(f"✅ Processed **{len(result_df):,}** orders")
 
-    # ── Tabs ─────────────────────────────────────────────────────────────
     tab1, tab2, tab3 = st.tabs([
         "📋  Reconciliation",
         "💰  Charges Summary",
@@ -439,7 +466,7 @@ if order_file and charges_file:
     # ╚══════════════════════════════════════════════════════════════════╝
     with tab1:
 
-        # ── PWN Not-Found editor (FIXED UI) ──────────────────────────
+        # ── PWN Not-Found editor ──────────────────────────────────────
         missing_df = result_df[result_df["PWN Match"] == "not_found"]
         if len(missing_df):
             with st.expander(
@@ -453,7 +480,6 @@ if order_file and charges_file:
                 missing_skus = missing_df["SKU"].unique().tolist()
                 override_inputs = {}
 
-                # Table-like layout: SKU label on left, number input on right
                 for sku in missing_skus:
                     c_label, c_input = st.columns([3, 2])
                     c_label.markdown(
@@ -461,8 +487,10 @@ if order_file and charges_file:
                         f"word-break:break-all'><b>{sku}</b></div>",
                         unsafe_allow_html=True,
                     )
-                    existing = float(st.session_state["pwn_overrides"].get(sku.upper(), 0.0))
-                    override_inputs[sku] = c_input.number_input(
+                    # Use stripped SKU as key so it matches the lookup key
+                    stripped = strip_vendor_prefix(sku)
+                    existing = float(st.session_state["pwn_overrides"].get(stripped.upper(), 0.0))
+                    override_inputs[stripped] = c_input.number_input(
                         "PWN (₹)",
                         value=existing,
                         min_value=0.0,
@@ -535,7 +563,7 @@ if order_file and charges_file:
         st.caption(f"Showing **{len(view):,}** of **{len(result_df):,}** orders")
 
         display_cols = [
-            "Order Id", "SKU", "Ordered On", "Category",
+            "Order Id", "SKU", "Lookup SKU", "Ordered On", "Category",
             "Invoice Amount", "GT Charge", "Selling Price",
             "Commission", "Collection Fee", "Fixed Fee",
             "Total Charges", "GST on Charges",
@@ -584,12 +612,8 @@ if order_file and charges_file:
             a1.metric("GST on Charges",     f"₹{result_df['GST on Charges'].sum():,.2f}")
             a2.metric("TDS",                f"₹{result_df['TDS'].sum():,.2f}")
             a1.metric("TCS",                f"₹{result_df['TCS'].sum():,.2f}")
-
             total_ded = result_df["Total Deductions"].sum()
-            st.metric(
-                "🔴 Total Deductions (all above)",
-                f"₹{total_ded:,.2f}",
-            )
+            st.metric("🔴 Total Deductions (all above)", f"₹{total_ded:,.2f}")
 
         with col_b:
             st.markdown("#### 📥 What You Receive")
@@ -608,8 +632,6 @@ if order_file and charges_file:
             b2.metric("Orders +ve Diff",    int((result_df["Difference"] > 0).sum()))
 
         st.markdown("---")
-
-        # Per-order charges table (NO background_gradient = no matplotlib crash)
         st.markdown("#### 📋 Per-Order Charges Detail")
         charge_cols = [
             "Order Id", "SKU", "Category",
@@ -695,6 +717,11 @@ Difference       = Received Amount − PWN
 
 **PWN lookup:** tries exact SKU first, then auto-maps combined sizes  
 (e.g. order SKU `7053YKBLS-L` → matches price sheet `7053YKBLS-L-XL`)
+
+**SKU prefix stripping:** Flipkart sometimes exports SKUs with a vendor prefix  
+(e.g. `GWN-1369YKMAROON-7XL` → looked up as `1369YKMAROON-7XL`).  
+The original SKU is still shown in the **SKU** column; **Lookup SKU** shows what was used.  
+Add more prefixes to `VENDOR_PREFIXES` at the top of `app.py` if needed.
 
 If a PWN is still missing, an editor appears to enter it manually.
 """)
