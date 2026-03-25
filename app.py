@@ -29,40 +29,42 @@ st.caption("Ashirwad Garments — auto-calculate Flipkart charges & reconcile or
 with st.sidebar:
     st.header("📂 Upload Files")
     order_file   = st.file_uploader("1️⃣  Order CSV  (Flipkart export)", type=["csv"])
-    charges_file = st.file_uploader("2️⃣  Data Excel (5-sheet workbook)", type=["xlsx"])
+    charges_file = st.file_uploader("2️⃣  Data Excel (Ashirwad workbook)", type=["xlsx"])
     st.markdown("---")
     st.subheader("⚙️ Settings")
     fixed_fee = st.number_input("Fixed Fee per order (₹)", value=5,  min_value=0, step=1)
     gst_rate  = st.number_input("GST on charges (%)",      value=18, min_value=0, step=1) / 100
     st.markdown("---")
     st.markdown("""
-**Excel sheet layout (5 sheets):**
-- **Sheet 1** – (ignored / any)
-- **Sheet 2** – Charges Description
-- **Sheet 3** – Category Description  (Seller SKU → Sub-category)
-- **Sheet 4** – Price We Need (PWN)
-- **Sheet 5** – (ignored / any)
+**Excel sheet layout (by position):**
+- **Sheet 2** (index 1) – Charges Decription
+- **Sheet 4** (index 3) – Category Discription
+- **Sheet 5** (index 4) – Price We Need
 
 **Charges sheet columns:**
-`Category` | `Lower Lim.` | `Upper Lim.` | `Charge` |
-`Coll.Lower Lim.` | `Coll. Upper Lim.` | `Coll.Charge` |
-`GT Lower Lim.` | `GT Upper Lim.` | `GT Charge`
+`Category` | `Lower Limit Commision` | `Upper Limit Commision` | `Commision Charge` |
+`Collection Lower Limit` | `Collection Upper Limit` | `Collection Charge` |
+`GT Lower Limit` | `GT Upper Limit` | `GT Charge`
 """)
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# CONSTANTS
+# CONSTANTS — Sub-category (Sheet3) → Charges Category (Sheet2) mapping
+# Lower-case sub-cat key  →  exact Category name in Charges sheet
 # ═══════════════════════════════════════════════════════════════════════════════
-
-# Sub-category names that differ from Sheet2 Category names
 CAT_MAP = {
-    "kurta":      "Kurta",
-    "top":        "Top",
-    "kaftan":     "Kaftan",
-    "trouser":    "Pant",
-    "shirt":      "Men's shirt",
-    "mens_kurta": "Men's Kurta",
-    # All others (ethnic_set, blouse, dress, night_suit, etc.)
-    # match Sheet2 directly via case-insensitive lookup
+    # Sheet3 value         : Sheet2 Category
+    "kurta":                "Kurta",
+    "top":                  "Top",
+    "kaftan":               "Kaftan",
+    "trouser":              "Pant",
+    "shirt":                "Men's shirt",
+    "mens_kurta":           "Men's Kurta",
+    "dress":                "Dresses",
+    "night_suit":           "Nightsuit Sets",
+    "apparel_set":          "Co-ords Set",
+    # These match Charges sheet directly (same name, case-insensitive fallback):
+    # blouse, coat, dungaree_romper, dupatta, ethnic_set, jumpsuit,
+    # kids_dress, kids_nightwear, kids_top, poncho, salwar_kurta_dupatta
 }
 
 SIZE_EXPAND = {
@@ -105,14 +107,10 @@ def strip_vendor_prefix(sku: str) -> str:
 
 def get_cat_for_lookup(sub_cat_raw: str, charges_df: pd.DataFrame) -> str:
     """
-    Map raw sub-category name (from Sheet3) to the Category value used in
-    Sheet2 charges table.
-
-    Rule:
-      1. Try the explicit CAT_MAP for names that differ (kurta→Kurta, trouser→Pant, etc.)
-      2. Fall back to a case-insensitive direct match against Sheet2 Category column.
-         e.g. 'ethnic_set', 'blouse', 'dress', 'night_suit' all match directly.
-      3. Return empty string if nothing matches (order will be left as NaN).
+    Map raw sub-category (from Category Discription sheet) to the Category
+    value used in Charges Decription sheet.
+    1. Try explicit CAT_MAP for names that differ.
+    2. Fallback: case-insensitive direct match against Charges Category column.
     """
     if not sub_cat_raw or sub_cat_raw == "nan":
         return ""
@@ -139,14 +137,11 @@ def lookup_pwn(sku: str, pwn_dict: dict) -> tuple:
 
 
 def get_gt_amount(cat: str, inv_amount: float, cdf: pd.DataFrame) -> float:
-    """
-    Look up fixed GT charge from Invoice Amount slab.
-    GT Amount = fixed ₹ value (not a percentage).
-    """
+    """GT Amount = fixed ₹ value from GT slab (keyed by Invoice Amount)."""
     rows = cdf[cdf["Category"].str.lower() == cat.strip().lower()]
     for _, r in rows.iterrows():
-        lo = r.get("GT Lower Lim.")
-        hi = r.get("GT Upper Lim.")
+        lo = r.get("GT Lower Limit")
+        hi = r.get("GT Upper Limit")
         gt = r.get("GT Charge")
         if pd.notna(lo) and pd.notna(hi) and pd.notna(gt):
             if float(lo) <= inv_amount <= float(hi) + 0.99:
@@ -158,9 +153,9 @@ def get_commission(cat: str, sell: float, cdf: pd.DataFrame) -> float:
     """Commission = Selling Price × Commission rate (slab by Selling Price)."""
     rows = cdf[cdf["Category"].str.lower() == cat.strip().lower()]
     for _, r in rows.iterrows():
-        lo = r.get("Lower Lim.")
-        hi = r.get("Upper Lim.")
-        ch = r.get("Charge")
+        lo = r.get("Lower Limit Commision")
+        hi = r.get("Upper Limit Commision")
+        ch = r.get("Commision Charge")
         if pd.notna(lo) and pd.notna(hi) and pd.notna(ch):
             if float(lo) <= sell <= float(hi) + 0.99:
                 return round(float(ch) * sell, 5)
@@ -171,9 +166,9 @@ def get_collection_fee(cat: str, sell: float, cdf: pd.DataFrame) -> float:
     """Collection Fee = Selling Price × Collection rate (slab by Selling Price)."""
     rows = cdf[cdf["Category"].str.lower() == cat.strip().lower()]
     for _, r in rows.iterrows():
-        lo_raw = r.get("Coll.Lower Lim.")
-        hi     = r.get("Coll. Upper Lim.")
-        cf     = r.get("Coll.Charge")
+        lo_raw = r.get("Collection Lower Limit")
+        hi     = r.get("Collection Upper Limit")
+        cf     = r.get("Collection Charge")
         if pd.isna(hi) or pd.isna(cf):
             continue
         lo_val = 0.0 if (pd.isna(lo_raw) or str(lo_raw).strip().startswith(">")) else float(lo_raw)
@@ -183,16 +178,16 @@ def get_collection_fee(cat: str, sell: float, cdf: pd.DataFrame) -> float:
 
 
 def parse_charges_df(raw: pd.DataFrame) -> pd.DataFrame:
-    """Parse Sheet2 (Charges Description)."""
+    """Parse 'Charges Decription' sheet."""
     df = raw.copy()
     df.columns = raw.iloc[0].tolist()
     df = df.iloc[1:].reset_index(drop=True)
     df = df[df["Category"].notna()].copy()
     df["Category"] = df["Category"].ffill()
     numeric_cols = [
-        "Lower Lim.", "Upper Lim.", "Charge",
-        "Coll.Lower Lim.", "Coll. Upper Lim.", "Coll.Charge",
-        "GT Lower Lim.", "GT Upper Lim.", "GT Charge",
+        "Lower Limit Commision", "Upper Limit Commision", "Commision Charge",
+        "Collection Lower Limit", "Collection Upper Limit", "Collection Charge",
+        "GT Lower Limit", "GT Upper Limit", "GT Charge",
     ]
     for col in numeric_cols:
         if col in df.columns:
@@ -201,18 +196,18 @@ def parse_charges_df(raw: pd.DataFrame) -> pd.DataFrame:
 
 
 def parse_sku_cat(raw: pd.DataFrame) -> dict:
-    """Parse Sheet3 (Category Description) → {SKU_UPPER: sub_category_raw}."""
+    """Parse 'Category Discription' → {SKU_UPPER: sub_category_raw}."""
     df = raw.copy()
     df.columns = raw.iloc[0].tolist()
     df = df.iloc[1:].reset_index(drop=True)
     return dict(zip(
-        df.iloc[:, 0].astype(str).str.strip().str.upper(),
-        df.iloc[:, 1].astype(str).str.strip(),
+        df["Seller SKU Id"].astype(str).str.strip().str.upper(),
+        df["Sub-category"].astype(str).str.strip(),
     ))
 
 
 def parse_pwn_dict(raw: pd.DataFrame) -> dict:
-    """Parse Sheet4 (Price We Need) → {SKU_UPPER: pwn_value}."""
+    """Parse 'Price We Need' → {SKU_UPPER: pwn_value}."""
     df = raw.copy()
     df.columns = raw.iloc[0].tolist()
     df = df.iloc[1:].reset_index(drop=True)
@@ -232,20 +227,18 @@ def run_reconciliation(order_df, charges_df, sku_cat_dict, pwn_dict,
     Per-order calculation:
 
         GT Amount        = Fixed ₹ charge from GT slab (Invoice Amount → slab)
-        Selling Price    = Invoice Amount − GT Amount       ← derived, NOT from CSV SP column
+        Selling Price    = Invoice Amount − GT Amount
 
-        Commission       = Selling Price × Commission %    (slab by Selling Price)
-        Collection Fee   = Selling Price × Collection %    (slab by Selling Price)
+        Commission       = Selling Price × Commission %  (slab by Selling Price)
+        Collection Fee   = Selling Price × Collection %  (slab by Selling Price)
         Total Charges    = Commission + Collection Fee + Fixed Fee
 
         GST              = Total Charges × 18%
 
-        Total Deductions = Total Charges + GST             (NO TDS, NO TCS)
+        Total Deductions = Total Charges + GST           (NO TDS, NO TCS)
         Received Amount  = Selling Price − Total Deductions
 
         Difference       = Received Amount − PWN
-
-        If category or GT slab not found → Selling Price and all charges = NaN
     """
     pwn_overrides = pwn_overrides or {}
     rows_out = []
@@ -258,15 +251,11 @@ def run_reconciliation(order_df, charges_df, sku_cat_dict, pwn_dict,
         inv_amount = float(row.get("Invoice Amount", 0) or 0)
         quantity   = int(row.get("Quantity", 1) or 1)
 
-        # ── Category ──────────────────────────────────────────────────
         sub_cat_raw = sku_cat_dict.get(sku.upper(), "")
         cat         = get_cat_for_lookup(sub_cat_raw, charges_df)
 
-        # ── GT lookup from Invoice Amount slab ────────────────────────
         gt_val = get_gt_amount(cat, inv_amount, charges_df) if cat else np.nan
 
-        # ── Selling Price = Invoice - GT ──────────────────────────────
-        # If no category or GT slab → leave everything as NaN
         if pd.isna(gt_val) or not cat:
             sell_price = np.nan
             gt_val     = np.nan
@@ -281,7 +270,6 @@ def run_reconciliation(order_df, charges_df, sku_cat_dict, pwn_dict,
             total_deductions = round(total_charges + gst_on_charges, 5)
             received_amount  = round(sell_price - total_deductions, 5)
 
-        # ── PWN ───────────────────────────────────────────────────────
         pwn_val, match_method = lookup_pwn(sku, pwn_dict)
         if sku.upper() in pwn_overrides:
             pwn_val, match_method = float(pwn_overrides[sku.upper()]), "manual"
@@ -461,14 +449,17 @@ if order_file and charges_file:
     with st.spinner("🔄 Reading files…"):
         order_df = pd.read_csv(order_file)
         xl       = pd.read_excel(charges_file, sheet_name=None, header=None)
-        sheets   = list(xl.values())
-        if len(sheets) < 4:
-            st.error("❌ Excel must have at least 4 sheets (Sheet2=Charges, Sheet3=Category, Sheet4=PWN).")
+
+        # Read sheets by POSITION: index 1=Charges, 3=Category, 4=Price We Need
+        sheets = list(xl.values())
+        if len(sheets) < 5:
+            st.error(f"❌ Excel must have at least 5 sheets. Found: {list(xl.keys())}")
             st.stop()
-        # Sheet index: 0=Sheet1(ignored), 1=Sheet2(Charges), 2=Sheet3(Category), 3=Sheet4(PWN)
-        charges_df   = parse_charges_df(sheets[1])
-        sku_cat_dict = parse_sku_cat(sheets[2])
-        pwn_dict     = parse_pwn_dict(sheets[3])
+
+        charges_df   = parse_charges_df(sheets[1])   # 'Charges Decription'
+        sku_cat_dict = parse_sku_cat(sheets[3])       # 'Category Discription'
+        pwn_dict     = parse_pwn_dict(sheets[4])      # 'Price We Need'
+
         st.session_state.update({
             "charges_df":   charges_df,
             "sku_cat_dict": sku_cat_dict,
@@ -497,7 +488,6 @@ if order_file and charges_file:
     # ╚══════════════════════════════════════════════════════════════════╝
     with tab1:
 
-        # ── PWN Not-Found editor ──────────────────────────────────────
         missing_df = result_df[result_df["PWN Match"] == "not_found"]
         if len(missing_df):
             with st.expander(
@@ -508,7 +498,7 @@ if order_file and charges_file:
                     "Each row below shows the full SKU. "
                     "Enter the correct PWN value and click **Save & Recalculate**."
                 )
-                missing_skus   = missing_df["SKU"].unique().tolist()
+                missing_skus    = missing_df["SKU"].unique().tolist()
                 override_inputs = {}
 
                 for sku in missing_skus:
@@ -539,7 +529,6 @@ if order_file and charges_file:
                     st.success("✅ Saved and recalculated!")
                     st.rerun()
 
-        # ── KPI strip ────────────────────────────────────────────────
         st.markdown("### 📊 Summary")
         valid = result_df[result_df["Received Amount"].notna()]
         k1,k2,k3,k4,k5,k6,k7,k8 = st.columns(8)
@@ -560,7 +549,6 @@ if order_file and charges_file:
 
         st.markdown("---")
 
-        # ── Filters ──────────────────────────────────────────────────
         f1, f2, f3 = st.columns([2, 2, 3])
         all_cats = ["All"] + sorted(result_df["Category"].dropna().unique().tolist())
         sel_cat  = f1.selectbox("Category", all_cats)
@@ -594,8 +582,8 @@ if order_file and charges_file:
         display_cols = [
             "Order Id", "SKU", "Lookup SKU", "Ordered On", "Category",
             "Qty", "Invoice Amount",
-            "GT (As Per Calc)",   # Fixed ₹ from GT slab
-            "Selling Price",      # Invoice Amount − GT
+            "GT (As Per Calc)",
+            "Selling Price",
             "Commission", "Collection Fee", "Fixed Fee",
             "Total Charges", "GST on Charges",
             "Total Deductions",
@@ -608,7 +596,6 @@ if order_file and charges_file:
             height=500,
         )
 
-        # ── Downloads ────────────────────────────────────────────────
         st.markdown("### 📥 Download")
         d1, d2 = st.columns(2)
         d1.download_button(
@@ -641,18 +628,15 @@ if order_file and charges_file:
             a2.metric("Collection Fee", f"₹{valid['Collection Fee'].sum():,.2f}")
             a1.metric("Fixed Fee",      f"₹{valid['Fixed Fee'].sum():,.2f}")
             a2.metric("GST on Charges", f"₹{valid['GST on Charges'].sum():,.2f}")
-            st.metric(
-                "🔴 Total Deductions",
-                f"₹{valid['Total Deductions'].sum():,.2f}",
-            )
+            st.metric("🔴 Total Deductions", f"₹{valid['Total Deductions'].sum():,.2f}")
 
         with col_b:
             st.markdown("#### 📥 What You Receive")
             b1, b2 = st.columns(2)
-            b1.metric("Total Invoice",   f"₹{result_df['Invoice Amount'].sum():,.2f}")
-            b2.metric("GT Total (ref)",  f"₹{valid['GT (As Per Calc)'].sum():,.2f}")
-            b1.metric("Selling Total",   f"₹{valid['Selling Price'].sum():,.2f}")
-            b2.metric("Total Received",  f"₹{valid['Received Amount'].sum():,.2f}")
+            b1.metric("Total Invoice",  f"₹{result_df['Invoice Amount'].sum():,.2f}")
+            b2.metric("GT Total (ref)", f"₹{valid['GT (As Per Calc)'].sum():,.2f}")
+            b1.metric("Selling Total",  f"₹{valid['Selling Price'].sum():,.2f}")
+            b2.metric("Total Received", f"₹{valid['Received Amount'].sum():,.2f}")
             net = valid["Difference"].sum()
             b1.metric(
                 "Net Diff vs PWN",
@@ -664,8 +648,7 @@ if order_file and charges_file:
 
         st.info(
             "ℹ️  **Selling Price** = Invoice Amount − GT Amount (GT looked up from Invoice slab).  "
-            "**GT Amount** is the fixed charge deducted to arrive at Selling Price — "
-            "it is displayed for reference but is already accounted for in Selling Price."
+            "**GT Amount** is the fixed charge deducted to arrive at Selling Price."
         )
 
         st.markdown("---")
@@ -677,11 +660,7 @@ if order_file and charges_file:
             "Total Charges", "GST on Charges",
             "Total Deductions", "Received Amount",
         ]
-        st.dataframe(
-            style_table(result_df[charge_cols]),
-            use_container_width=True,
-            height=480,
-        )
+        st.dataframe(style_table(result_df[charge_cols]), use_container_width=True, height=480)
 
         st.markdown("---")
         st.markdown("#### 🧾 Grand Summary Table")
@@ -726,7 +705,7 @@ else:
 | File | Description |
 |------|-------------|
 | **Order CSV** | Flipkart Seller Hub export — uses `Order Id`, `SKU`, `Ordered On`, `Invoice Amount`, `Quantity` |
-| **Data Excel** | 5-sheet workbook: Sheet2=Charges / Sheet3=Category / Sheet4=Price We Need |
+| **Data Excel** | Ashirwad workbook: **Charges Decription** / **Category Discription** / **Price We Need** |
 
 ---
 ### Calculation per order
@@ -734,7 +713,7 @@ else:
 ```
 GT Amount        = Fixed ₹ charge from GT slab  (Invoice Amount → slab lookup)
 
-Selling Price    = Invoice Amount − GT Amount    ← NOT the CSV SP column
+Selling Price    = Invoice Amount − GT Amount
 
 Commission       = Selling Price × Commission %  (slab lookup by Selling Price)
 Collection Fee   = Selling Price × Collection %  (slab lookup by Selling Price)
@@ -748,14 +727,23 @@ Received Amount  = Selling Price − Total Deductions
 Difference       = Received Amount − PWN
 ```
 
-**If category or GT slab not found** → all charges shown as — (not calculated).
+**Category mapping** (sub-category → Charges sheet):
 
-**PWN lookup:** tries exact SKU first, then auto-maps combined sizes  
-(e.g. order SKU `7053YKBLS-L` → matches price sheet `7053YKBLS-L-XL`)
+| Sub-category (Sheet)  | Charges Category  |
+|-----------------------|-------------------|
+| kurta                 | Kurta             |
+| top                   | Top               |
+| kaftan                | Kaftan            |
+| trouser               | Pant              |
+| shirt                 | Men's shirt       |
+| mens_kurta            | Men's Kurta       |
+| dress                 | Dresses           |
+| night_suit            | Nightsuit Sets    |
+| apparel_set           | Co-ords Set       |
+| blouse, coat, dungaree_romper, dupatta, ethnic_set, jumpsuit, kids_dress, kids_nightwear, kids_top, poncho, salwar_kurta_dupatta | matched directly |
 
-**SKU prefix stripping:** vendor prefix `GWN-` / `GWN_` stripped before lookups.
+**PWN lookup:** exact SKU first, then auto-maps combined sizes  
+(e.g. `7053YKBLS-L` → matches `7053YKBLS-L-XL`)
 
-**Category matching:** sub-category names from Sheet3 are matched to Sheet2  
-using a case-insensitive lookup (e.g. `kurta` → `Kurta`, `trouser` → `Pant`,  
-`ethnic_set`, `blouse`, `dress`, `night_suit` etc. match directly).
+**SKU prefix stripping:** `GWN-` / `GWN_` stripped before lookups.
 """)
