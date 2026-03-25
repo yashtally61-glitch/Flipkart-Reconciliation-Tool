@@ -118,10 +118,15 @@ def get_cat_for_lookup(sub_cat_raw: str, cat_map: dict, manual_map: dict) -> str
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def strip_vendor_prefix(sku: str) -> str:
+    import re
     upper = sku.upper()
     for prefix in VENDOR_PREFIXES:
         if upper.startswith(prefix.upper()):
-            return sku[len(prefix):]
+            sku = sku[len(prefix):]
+            break
+    # Replace YKN and YKC → YK anywhere in the SKU (case-insensitive)
+    sku = re.sub(r"(?i)YKN", "YK", sku)
+    sku = re.sub(r"(?i)YKC", "YK", sku)
     return sku
 
 
