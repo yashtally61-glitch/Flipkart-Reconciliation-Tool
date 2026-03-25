@@ -87,7 +87,7 @@ for _ps, _os_list in SIZE_EXPAND.items():
     for _os in _os_list:
         ORDER_TO_PRICE_SIZE[_os.upper()].append(_ps)
 
-VENDOR_PREFIXES = ["GWN-", "GWN_", "GWN", "SPF-", "SPF_", "SPF"]
+VENDOR_PREFIXES = ["GWN-", "GWN_", "GWN", "SPF-", "SPF_", "SPF", "KL_", "KL-", "KL"]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -397,38 +397,34 @@ def style_table(df: pd.DataFrame, diff_col: str = "Difference") -> object:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def apply_roc_sheet_style(ws, df: pd.DataFrame):
-    """Apply rich formatting to the Reconciliation sheet."""
+    """Apply rich formatting + live Excel formulas to the Reconciliation sheet."""
 
     # ── Colour palette ──────────────────────────────────────────────────────
-    C_HEADER_BG   = "1A3C5E"   # deep navy
-    C_HEADER_FG   = "FFFFFF"   # white text
-    C_ALT1        = "EAF2FB"   # light blue row
-    C_ALT2        = "FFFFFF"   # white row
-    C_GREEN_BG    = "D6EFDD"   # positive diff bg
-    C_RED_BG      = "FDDEDE"   # negative diff bg
-    C_ZERO_BG     = "FFF9E6"   # zero diff bg
-    C_NAN_BG      = "F5F5F5"   # n/a row bg
-    C_SECTION_BG  = "2980B9"   # section sub-header
-    C_SECTION_FG  = "FFFFFF"
-    C_TOTAL_BG    = "1A3C5E"
-    C_TOTAL_FG    = "FFD700"   # gold
-    C_BORDER      = "B0C4D8"
+    C_HEADER_BG = "1A3C5E"
+    C_HEADER_FG = "FFFFFF"
+    C_ALT1      = "EAF2FB"
+    C_ALT2      = "FFFFFF"
+    C_GREEN_BG  = "D6EFDD"
+    C_RED_BG    = "FDDEDE"
+    C_ZERO_BG   = "FFF9E6"
+    C_TOTAL_BG  = "1A3C5E"
+    C_TOTAL_FG  = "FFD700"
+    C_BORDER    = "B0C4D8"
 
-    thin  = Side(style="thin",   color=C_BORDER)
-    thick = Side(style="medium", color="1A3C5E")
-    bdr   = Border(left=thin, right=thin, top=thin, bottom=thin)
+    thin       = Side(style="thin",   color=C_BORDER)
+    thick      = Side(style="medium", color="1A3C5E")
+    bdr        = Border(left=thin,  right=thin,  top=thin,  bottom=thin)
     bdr_header = Border(left=thick, right=thick, top=thick, bottom=thick)
 
-    # Money columns by name (for number format)
     money_names = set(MONEY_COLS)
+    cols        = df.columns.tolist()
 
-    # ── Header row (row 1) ──────────────────────────────────────────────────
-    for cell in ws[1]:
-        cell.fill      = PatternFill("solid", fgColor=C_HEADER_BG)
-        cell.font      = Font(bold=True, color=C_HEADER_FG, size=10, name="Calibri")
-        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        cell.border    = bdr_header
-    ws.row_dimensions[1].height = 30
+    # Helper: get Excel column letter by column name
+    def col_letter(name):
+        return get_column_letter(cols.index(name) + 1) if name in cols else None
+
+    # ── Build column-name → letter map ──────────────────────────────────────
+    C = {name: get_column_letter(i + 1) for i, name in enumerate(cols)}
 
     # ── Column widths ───────────────────────────────────────────────────────
     col_widths = {
@@ -441,75 +437,174 @@ def apply_roc_sheet_style(ws, df: pd.DataFrame):
         "Total Deductions": 16, "Received Amount": 16,
         "PWN": 12, "PWN Benchmark": 15, "PWN Match": 14, "Difference": 14,
     }
-    for i, col_name in enumerate(df.columns, start=1):
-        letter = get_column_letter(i)
-        ws.column_dimensions[letter].width = col_widths.get(col_name, 14)
+    for i, col_name in enumerate(cols, start=1):
+        ws.column_dimensions[get_column_letter(i)].width = col_widths.get(col_name, 14)
 
-    # Identify Difference column index
-    diff_col_idx = None
-    if "Difference" in df.columns:
-        diff_col_idx = df.columns.tolist().index("Difference") + 1
+    # ── Header row ──────────────────────────────────────────────────────────
+    for cell in ws[1]:
+        cell.fill      = PatternFill("solid", fgColor=C_HEADER_BG)
+        cell.font      = Font(bold=True, color=C_HEADER_FG, size=10, name="Calibri")
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border    = bdr_header
+    ws.row_dimensions[1].height = 30
+
+    diff_col_idx = cols.index("Difference") + 1 if "Difference" in cols else None
+
+    # ── Formulas per calculated column (Excel formula templates using {r}) ──
+    # These replace the Python-computed values with live Excel formulas.
+    # Only written when the row has a valid Selling Price (not blank).
+    # SP = Selling Price column letter
+    def row_formulas(r):
+        """Return dict of col_name → Excel formula string for row r."""
+        sp   = C.get("Selling Price",    "")
+        inv  = C.get("Invoice Amount",   "")
+        gt   = C.get("GT (As Per Calc)", "")
+        qty  = C.get("Qty",              "")
+        com  = C.get("Commission",       "")
+        colf = C.get("Collection Fee",   "")
+        ff   = C.get("Fixed Fee",        "")
+        tc   = C.get("Total Charges",    "")
+        gst  = C.get("GST on Charges",   "")
+        tv   = C.get("Taxable Value",    "")
+        tds  = C.get("TDS",              "")
+        tcs  = C.get("TCS",              "")
+        td   = C.get("Total Deductions", "")
+        ra   = C.get("Received Amount",  "")
+        pwn  = C.get("PWN",              "")
+        pb   = C.get("PWN Benchmark",    "")
+        diff = C.get("Difference",       "")
+
+        formulas = {}
+
+        # Selling Price = (Invoice Amount - GT) * Qty
+        if sp and inv and gt and qty:
+            formulas["Selling Price"] = (
+                f'=IF(OR({gt}{r}="",{gt}{r}=0),"",'
+                f'ROUND(({inv}{r}-{gt}{r})*{qty}{r},2))'
+            )
+
+        # Total Charges = Commission + Collection Fee + Fixed Fee
+        if tc and com and colf and ff:
+            formulas["Total Charges"] = (
+                f'=IF({sp}{r}="","",ROUND({com}{r}+{colf}{r}+{ff}{r},2))'
+            )
+
+        # GST on Charges
+        if gst and tc:
+            formulas["GST on Charges"] = (
+                f'=IF({tc}{r}="","",ROUND({tc}{r}*0.18,2))'
+            )
+
+        # Taxable Value = SP - SP/105*5
+        if tv and sp:
+            formulas["Taxable Value"] = (
+                f'=IF({sp}{r}="","",ROUND({sp}{r}-{sp}{r}/105*5,2))'
+            )
+
+        # TDS = Taxable Value * 0.1%
+        if tds and tv:
+            formulas["TDS"] = (
+                f'=IF({tv}{r}="","",ROUND({tv}{r}*0.001,2))'
+            )
+
+        # TCS = Taxable Value * 0.5%
+        if tcs and tv:
+            formulas["TCS"] = (
+                f'=IF({tv}{r}="","",ROUND({tv}{r}*0.005,2))'
+            )
+
+        # Total Deductions = Total Charges + GST + TDS + TCS
+        if td and tc and gst and tds and tcs:
+            formulas["Total Deductions"] = (
+                f'=IF({tc}{r}="","",ROUND({tc}{r}+{gst}{r}+{tds}{r}+{tcs}{r},2))'
+            )
+
+        # Received Amount = SP - Total Charges - GST - TDS - TCS
+        if ra and sp and tc and gst and tds and tcs:
+            formulas["Received Amount"] = (
+                f'=IF({sp}{r}="","",ROUND({sp}{r}-{tc}{r}-{gst}{r}-{tds}{r}-{tcs}{r},2))'
+            )
+
+        # PWN Benchmark = PWN * Qty
+        if pb and pwn and qty:
+            formulas["PWN Benchmark"] = (
+                f'=IF({pwn}{r}="","",ROUND({pwn}{r}*{qty}{r},2))'
+            )
+
+        # Difference = Received Amount - PWN Benchmark
+        if diff and ra and pb:
+            formulas["Difference"] = (
+                f'=IF(OR({ra}{r}="",{pb}{r}=""),"",ROUND({ra}{r}-{pb}{r},2))'
+            )
+
+        return formulas
 
     # ── Data rows ───────────────────────────────────────────────────────────
     for r_idx, row_data in enumerate(df.itertuples(index=False), start=2):
-        alt_fill = PatternFill("solid", fgColor=C_ALT1 if r_idx % 2 == 0 else C_ALT2)
-        diff_val = getattr(row_data, "Difference", None)
+        alt_fill  = PatternFill("solid", fgColor=C_ALT1 if r_idx % 2 == 0 else C_ALT2)
+        formulas  = row_formulas(r_idx)
+        diff_val  = getattr(row_data, "Difference", None)
 
-        for c_idx, (col_name, val) in enumerate(zip(df.columns, row_data), start=1):
+        for c_idx, (col_name, val) in enumerate(zip(cols, row_data), start=1):
             cell = ws.cell(row=r_idx, column=c_idx)
-            cell.value  = None if (isinstance(val, float) and np.isnan(val)) else val
+
+            # Use formula if available, else raw value
+            if col_name in formulas:
+                cell.value = formulas[col_name]
+            else:
+                cell.value = None if (isinstance(val, float) and np.isnan(val)) else val
+
             cell.border = bdr
             cell.font   = Font(size=9, name="Calibri")
+            cell.fill   = alt_fill
 
-            # Alternating row background
-            cell.fill = alt_fill
-
-            # Number format for money columns
-            if col_name in money_names and isinstance(val, (int, float)) and not (isinstance(val, float) and np.isnan(val)):
+            if col_name in money_names:
                 cell.number_format = '₹#,##0.00'
-                cell.alignment = Alignment(horizontal="right", vertical="center")
+                cell.alignment     = Alignment(horizontal="right", vertical="center")
             elif col_name == "Qty":
                 cell.alignment = Alignment(horizontal="center", vertical="center")
             else:
-                cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=False)
+                cell.alignment = Alignment(horizontal="left", vertical="center")
 
-            # Colour the Difference cell
-            if c_idx == diff_col_idx and isinstance(val, float) and not np.isnan(val):
-                if val < 0:
-                    cell.fill = PatternFill("solid", fgColor=C_RED_BG)
-                    cell.font = Font(color="C0392B", bold=True, size=9, name="Calibri")
-                elif val > 0:
-                    cell.fill = PatternFill("solid", fgColor=C_GREEN_BG)
-                    cell.font = Font(color="1E8449", bold=True, size=9, name="Calibri")
-                else:
-                    cell.fill = PatternFill("solid", fgColor=C_ZERO_BG)
-                    cell.font = Font(color="7D6608", bold=True, size=9, name="Calibri")
+            # Conditional colour on Difference column
+            if c_idx == diff_col_idx:
+                try:
+                    v = float(val)
+                    if not np.isnan(v):
+                        if v < 0:
+                            cell.fill = PatternFill("solid", fgColor=C_RED_BG)
+                            cell.font = Font(color="C0392B", bold=True, size=9, name="Calibri")
+                        elif v > 0:
+                            cell.fill = PatternFill("solid", fgColor=C_GREEN_BG)
+                            cell.font = Font(color="1E8449", bold=True, size=9, name="Calibri")
+                        else:
+                            cell.fill = PatternFill("solid", fgColor=C_ZERO_BG)
+                            cell.font = Font(color="7D6608", bold=True, size=9, name="Calibri")
+                except Exception:
+                    pass
 
         ws.row_dimensions[r_idx].height = 16
 
-    # ── Freeze top row ───────────────────────────────────────────────────────
-    ws.freeze_panes = "A2"
+    # ── Freeze & filter ─────────────────────────────────────────────────────
+    ws.freeze_panes       = "A2"
+    ws.auto_filter.ref    = ws.dimensions
 
-    # ── Auto-filter ──────────────────────────────────────────────────────────
-    ws.auto_filter.ref = ws.dimensions
-
-    # ── Totals row at the bottom ─────────────────────────────────────────────
+    # ── TOTALS row ──────────────────────────────────────────────────────────
     last_data_row = len(df) + 1
-    total_row     = last_data_row + 2   # blank gap
+    total_row     = last_data_row + 2
 
-    label_col = 1
-    ws.cell(row=total_row, column=label_col).value = "TOTALS"
-    ws.cell(row=total_row, column=label_col).font  = Font(bold=True, color=C_TOTAL_FG, size=10, name="Calibri")
-    ws.cell(row=total_row, column=label_col).fill  = PatternFill("solid", fgColor=C_TOTAL_BG)
-
-    for c_idx, col_name in enumerate(df.columns, start=1):
-        cell = ws.cell(row=total_row, column=c_idx)
+    for c_idx, col_name in enumerate(cols, start=1):
+        cell        = ws.cell(row=total_row, column=c_idx)
         cell.fill   = PatternFill("solid", fgColor=C_TOTAL_BG)
         cell.font   = Font(bold=True, color=C_TOTAL_FG, size=10, name="Calibri")
         cell.border = bdr_header
-        if col_name in money_names:
-            col_letter = get_column_letter(c_idx)
-            cell.value         = f"=SUM({col_letter}2:{col_letter}{last_data_row})"
+
+        if c_idx == 1:
+            cell.value     = "TOTALS"
+            cell.alignment = Alignment(horizontal="left", vertical="center")
+        elif col_name in money_names:
+            col_l              = get_column_letter(c_idx)
+            cell.value         = f"=SUM({col_l}2:{col_l}{last_data_row})"
             cell.number_format = '₹#,##0.00'
             cell.alignment     = Alignment(horizontal="right", vertical="center")
 
@@ -517,31 +612,55 @@ def apply_roc_sheet_style(ws, df: pd.DataFrame):
 
 
 def apply_summary_style(ws):
-    """Style the summary/charges sheet."""
-    C_H = "2C3E50"; C_FG = "FFFFFF"
+    """Style the summary/charges sheet with formulas in total rows."""
+    C_H   = "2C3E50"; C_FG  = "FFFFFF"
     C_ODD = "EBF5FB"; C_EVEN = "FFFFFF"
-    thin = Side(style="thin", color="AED6F1")
-    bdr  = Border(left=thin, right=thin, top=thin, bottom=thin)
+    thin  = Side(style="thin", color="AED6F1")
+    bdr   = Border(left=thin, right=thin, top=thin, bottom=thin)
 
     for cell in ws[1]:
-        cell.fill  = PatternFill("solid", fgColor=C_H)
-        cell.font  = Font(bold=True, color=C_FG, size=10, name="Calibri")
+        cell.fill      = PatternFill("solid", fgColor=C_H)
+        cell.font      = Font(bold=True, color=C_FG, size=10, name="Calibri")
         cell.alignment = Alignment(horizontal="center", vertical="center")
-        cell.border = bdr
+        cell.border    = bdr
     ws.row_dimensions[1].height = 24
 
     for r_idx in range(2, ws.max_row + 1):
         fill = PatternFill("solid", fgColor=C_ODD if r_idx % 2 == 0 else C_EVEN)
         for cell in ws[r_idx]:
-            cell.fill   = fill
-            cell.font   = Font(size=9, name="Calibri")
-            cell.border = bdr
+            cell.fill      = fill
+            cell.font      = Font(size=9, name="Calibri")
+            cell.border    = bdr
             cell.alignment = Alignment(vertical="center")
         ws.row_dimensions[r_idx].height = 15
 
+    # Auto-width
     for col_cells in ws.columns:
         width = max((len(str(c.value or "")) for c in col_cells), default=10)
         ws.column_dimensions[col_cells[0].column_letter].width = min(width + 4, 40)
+
+    # Totals row for numeric columns
+    last_row  = ws.max_row
+    total_row = last_row + 2
+    for c_idx in range(1, ws.max_column + 1):
+        header_cell = ws.cell(row=1, column=c_idx)
+        sample_cell = ws.cell(row=2, column=c_idx)
+        tot_cell    = ws.cell(row=total_row, column=c_idx)
+        tot_cell.fill   = PatternFill("solid", fgColor="2C3E50")
+        tot_cell.font   = Font(bold=True, color="FFD700", size=10, name="Calibri")
+        tot_cell.border = Border(
+            left=Side(style="medium", color="2C3E50"),
+            right=Side(style="medium", color="2C3E50"),
+            top=Side(style="medium", color="2C3E50"),
+            bottom=Side(style="medium", color="2C3E50"),
+        )
+        if c_idx == 1:
+            tot_cell.value = "TOTALS"
+        elif isinstance(sample_cell.value, (int, float)):
+            col_l           = get_column_letter(c_idx)
+            tot_cell.value  = f"=SUM({col_l}2:{col_l}{last_row})"
+            tot_cell.number_format = '₹#,##0.00'
+            tot_cell.alignment     = Alignment(horizontal="right", vertical="center")
 
     ws.freeze_panes = "A2"
 
@@ -550,12 +669,10 @@ def to_excel(recon_df, summary_df, cat_df) -> bytes:
     buf = BytesIO()
 
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-        # Write DataFrames first (plain)
         recon_df.to_excel(writer,   index=False, sheet_name="Reconciliation")
         cat_df.to_excel(writer,     index=False, sheet_name="Category Breakdown")
         summary_df.to_excel(writer, index=False, sheet_name="Charges Summary")
 
-        # Now apply rich styling
         apply_roc_sheet_style(writer.sheets["Reconciliation"], recon_df)
         apply_summary_style(writer.sheets["Category Breakdown"])
         apply_summary_style(writer.sheets["Charges Summary"])
