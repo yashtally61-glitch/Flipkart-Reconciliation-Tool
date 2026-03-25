@@ -12,7 +12,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 st.set_page_config(
-    page_title="Flipkart Reconciliation – Ashirwad Garments",
+    page_title="Flipkart Reconciliation – Yash Gallery Private Limited",
     layout="wide",
     page_icon="🧾",
 )
@@ -25,7 +25,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("🧾 Flipkart Reconciliation Tool")
-st.caption("Ashirwad Garments — auto-calculate Flipkart charges & reconcile orders")
+st.caption("Yash Gallery Private Limited — Tool made by Ashu Bhatt | Finance Team")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SIDEBAR
@@ -33,7 +33,7 @@ st.caption("Ashirwad Garments — auto-calculate Flipkart charges & reconcile or
 with st.sidebar:
     st.header("📂 Upload Files")
     order_file      = st.file_uploader("1️⃣  Order CSV  (Flipkart export)", type=["csv"])
-    charges_file    = st.file_uploader("2️⃣  Data Excel (Ashirwad workbook)", type=["xlsx"])
+    charges_file    = st.file_uploader("2️⃣  Data Excel", type=["xlsx"])
     replace_sku_file = st.file_uploader("3️⃣  Replace SKU Excel (optional override)", type=["xlsx"])
     st.markdown("---")
     st.subheader("⚙️ Settings")
@@ -87,7 +87,7 @@ for _ps, _os_list in SIZE_EXPAND.items():
     for _os in _os_list:
         ORDER_TO_PRICE_SIZE[_os.upper()].append(_ps)
 
-VENDOR_PREFIXES = ["GWN-", "GWN_"]
+VENDOR_PREFIXES = ["GWN-", "GWN_", "GWN", "SPF-", "SPF_", "SPF"]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -982,7 +982,7 @@ else:
 | File | Description |
 |------|-------------|
 | **Order CSV** | Flipkart Seller Hub export — needs: `Order Id`, `SKU`, `Ordered On`, `Invoice Amount`, `Quantity` |
-| **Data Excel** | Ashirwad workbook — 3 sheets by position (see below) |
+| **Data Excel** | Yash Gallery workbook — 3 sheets by position (see below) |
 | **Replace SKU Excel** *(optional)* | Maps Seller SKU Id → OMS SKU for PWN fallback lookup |
 
 **Excel sheet positions:**
