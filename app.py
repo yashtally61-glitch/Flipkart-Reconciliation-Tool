@@ -238,8 +238,7 @@ def run_reconciliation(order_df, charges_df, sku_cat_dict, pwn_dict,
             total_charges    = round(commission + coll_fee + float(fixed_fee), 5)
             gst_on_charges   = round(total_charges * gst_rate, 5)
             total_deductions = round(total_charges + gst_on_charges, 5)
-            # Received Amount = Selling Price - Total Charges - GST on Charges - Total Deductions
-            received_amount  = round(sell_price - total_charges - gst_on_charges - total_deductions, 5)
+            received_amount  = round(sell_price - total_deductions, 5)
 
         pwn_val, match_method = lookup_pwn(sku, pwn_dict)
         if sku.upper() in pwn_overrides:
@@ -667,8 +666,8 @@ if order_file and charges_file:
             b2.metric("Orders –ve Diff", int((valid["Difference"] < 0).sum()))
 
         st.info(
-            "ℹ️  **Selling Price** = Invoice Amount − GT Amount.  "
-            "**Received Amount** = Selling Price − Total Charges − GST on Charges − Total Deductions.  "
+            "ℹ️  **Selling Price** = Invoice Amount − GT Amount. "
+            "**GT Amount** is the fixed ₹ charge from the GT slab. "
             "No TDS or TCS deducted."
         )
 
@@ -754,9 +753,8 @@ Collection Fee   = Selling Price × Collection %   (slab by Selling Price)
 Total Charges    = Commission + Collection Fee + Fixed Fee (₹5)
 
 GST              = Total Charges × 18%
-Total Deductions = Total Charges + GST
-
-Received Amount  = Selling Price − Total Charges − GST on Charges − Total Deductions
+Total Deductions = Total Charges + GST            (NO TDS, NO TCS)
+Received Amount  = Selling Price − Total Deductions
 
 Difference       = Received Amount − PWN
 ```
