@@ -209,11 +209,11 @@ def calc_taxable_value(selling_price: float) -> float:
     return selling_price - (selling_price / 105 * 5)
 
 
-def calc_tds(taxable_value: float, rate: float = TDS_RATE) -> float:
+def calc_tds(taxable_value: float, rate: float = 0.001) -> float:
     return round(taxable_value * rate, 5)
 
 
-def calc_tcs(taxable_value: float, rate: float = TCS_RATE) -> float:
+def calc_tcs(taxable_value: float, rate: float = 0.005) -> float:
     return round(taxable_value * rate, 5)
 
 
@@ -277,14 +277,20 @@ def run_reconciliation(order_df, charges_df, sku_cat_dict, pwn_dict,
                        cat_map, manual_cat_map,
                        fixed_fee, gst_rate,
                        replace_map: dict = None,
-                       pwn_overrides: dict = None) -> pd.DataFrame:
-    pwn_overrides = pwn_overrides or {}
-    replace_map   = replace_map   or {}
+                       pwn_overrides: dict = None,
+                       sku_corrections: dict = None) -> pd.DataFrame:
+    pwn_overrides   = pwn_overrides   or {}
+    replace_map     = replace_map     or {}
+    sku_corrections = sku_corrections or {}
     rows_out = []
 
     for _, row in order_df.iterrows():
         raw_sku    = str(row.get("SKU", "")).strip()
-        sku        = strip_vendor_prefix(raw_sku)
+
+        # Apply manual SKU correction if user provided one
+        corrected_raw = sku_corrections.get(raw_sku.upper(), raw_sku)
+        sku           = strip_vendor_prefix(corrected_raw)
+
         order_id   = str(row.get("Order Id", "")).strip()
         ordered_on = row.get("Ordered On", "")
         inv_amount = float(row.get("Invoice Amount", 0) or 0)
@@ -332,10 +338,14 @@ def run_reconciliation(order_df, charges_df, sku_cat_dict, pwn_dict,
             pwn_benchmark = np.nan
             difference    = np.nan
 
+        # Track whether this row used a correction
+        was_corrected = raw_sku.upper() in sku_corrections
+
         rows_out.append({
             "Order Id":         order_id,
             "SKU":              raw_sku,
             "Lookup SKU":       sku,
+            "SKU Corrected":    "✅ Yes" if was_corrected else "",
             "Ordered On":       ordered_on,
             "Sub-Category":     sub_cat_raw,
             "Charges Category": cat,
@@ -424,16 +434,12 @@ def apply_roc_sheet_style(ws, df: pd.DataFrame):
     money_names = set(MONEY_COLS)
     cols        = df.columns.tolist()
 
-    # Helper: get Excel column letter by column name
-    def col_letter(name):
-        return get_column_letter(cols.index(name) + 1) if name in cols else None
-
     # ── Build column-name → letter map ──────────────────────────────────────
     C = {name: get_column_letter(i + 1) for i, name in enumerate(cols)}
 
     # ── Column widths ───────────────────────────────────────────────────────
     col_widths = {
-        "Order Id": 20, "SKU": 28, "Lookup SKU": 22,
+        "Order Id": 20, "SKU": 28, "Lookup SKU": 22, "SKU Corrected": 14,
         "Ordered On": 14, "Sub-Category": 20, "Charges Category": 18,
         "Qty": 6, "Invoice Amount": 15, "GT (As Per Calc)": 15,
         "Selling Price": 15, "Commission": 14, "Collection Fee": 15,
@@ -455,12 +461,8 @@ def apply_roc_sheet_style(ws, df: pd.DataFrame):
 
     diff_col_idx = cols.index("Difference") + 1 if "Difference" in cols else None
 
-    # ── Formulas per calculated column (Excel formula templates using {r}) ──
-    # These replace the Python-computed values with live Excel formulas.
-    # Only written when the row has a valid Selling Price (not blank).
-    # SP = Selling Price column letter
+    # ── Formulas per calculated column ──────────────────────────────────────
     def row_formulas(r):
-        """Return dict of col_name → Excel formula string for row r."""
         sp   = C.get("Selling Price",    "")
         inv  = C.get("Invoice Amount",   "")
         gt   = C.get("GT (As Per Calc)", "")
@@ -481,62 +483,43 @@ def apply_roc_sheet_style(ws, df: pd.DataFrame):
 
         formulas = {}
 
-        # Selling Price = (Invoice Amount - GT) * Qty
         if sp and inv and gt and qty:
             formulas["Selling Price"] = (
                 f'=IF(OR({gt}{r}="",{gt}{r}=0),"",'
                 f'ROUND(({inv}{r}-{gt}{r})*{qty}{r},2))'
             )
-
-        # Total Charges = Commission + Collection Fee + Fixed Fee
         if tc and com and colf and ff:
             formulas["Total Charges"] = (
                 f'=IF({sp}{r}="","",ROUND({com}{r}+{colf}{r}+{ff}{r},2))'
             )
-
-        # GST on Charges
         if gst and tc:
             formulas["GST on Charges"] = (
                 f'=IF({tc}{r}="","",ROUND({tc}{r}*0.18,2))'
             )
-
-        # Taxable Value = SP - SP/105*5
         if tv and sp:
             formulas["Taxable Value"] = (
                 f'=IF({sp}{r}="","",ROUND({sp}{r}-{sp}{r}/105*5,2))'
             )
-
-        # TDS = Taxable Value * 0.1%
         if tds and tv:
             formulas["TDS"] = (
                 f'=IF({tv}{r}="","",ROUND({tv}{r}*0.001,2))'
             )
-
-        # TCS = Taxable Value * 0.5%
         if tcs and tv:
             formulas["TCS"] = (
                 f'=IF({tv}{r}="","",ROUND({tv}{r}*0.005,2))'
             )
-
-        # Total Deductions = Total Charges + GST + TDS + TCS
         if td and tc and gst and tds and tcs:
             formulas["Total Deductions"] = (
                 f'=IF({tc}{r}="","",ROUND({tc}{r}+{gst}{r}+{tds}{r}+{tcs}{r},2))'
             )
-
-        # Received Amount = SP - Total Charges - GST - TDS - TCS
         if ra and sp and tc and gst and tds and tcs:
             formulas["Received Amount"] = (
                 f'=IF({sp}{r}="","",ROUND({sp}{r}-{tc}{r}-{gst}{r}-{tds}{r}-{tcs}{r},2))'
             )
-
-        # PWN Benchmark = PWN * Qty
         if pb and pwn and qty:
             formulas["PWN Benchmark"] = (
                 f'=IF({pwn}{r}="","",ROUND({pwn}{r}*{qty}{r},2))'
             )
-
-        # Difference = Received Amount - PWN Benchmark
         if diff and ra and pb:
             formulas["Difference"] = (
                 f'=IF(OR({ra}{r}="",{pb}{r}=""),"",ROUND({ra}{r}-{pb}{r},2))'
@@ -553,7 +536,6 @@ def apply_roc_sheet_style(ws, df: pd.DataFrame):
         for c_idx, (col_name, val) in enumerate(zip(cols, row_data), start=1):
             cell = ws.cell(row=r_idx, column=c_idx)
 
-            # Use formula if available, else raw value
             if col_name in formulas:
                 cell.value = formulas[col_name]
             else:
@@ -568,6 +550,11 @@ def apply_roc_sheet_style(ws, df: pd.DataFrame):
                 cell.alignment     = Alignment(horizontal="right", vertical="center")
             elif col_name == "Qty":
                 cell.alignment = Alignment(horizontal="center", vertical="center")
+            elif col_name == "SKU Corrected":
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+                if val == "✅ Yes":
+                    cell.fill = PatternFill("solid", fgColor="D6EFDD")
+                    cell.font = Font(color="1E8449", bold=True, size=9, name="Calibri")
             else:
                 cell.alignment = Alignment(horizontal="left", vertical="center")
 
@@ -696,6 +683,7 @@ def build_summary(df: pd.DataFrame) -> tuple:
         ("Total Orders",              len(df)),
         ("Orders Calculated",         int(df["Received Amount"].notna().sum())),
         ("Orders NaN (no category)",  int(df["Received Amount"].isna().sum())),
+        ("SKU Corrections Applied",   int((df.get("SKU Corrected", pd.Series(dtype=str)) == "✅ Yes").sum())),
         ("Total Invoice Amount",      df["Invoice Amount"].sum()),
         ("Total GT (As Per Calc)",    valid["GT (As Per Calc)"].sum()),
         ("Total Selling Price",       valid["Selling Price"].sum()),
@@ -758,6 +746,7 @@ def build_summary(df: pd.DataFrame) -> tuple:
 # ═══════════════════════════════════════════════════════════════════════════════
 for k, v in [
     ("pwn_overrides",  {}),
+    ("sku_corrections", {}),
     ("manual_cat_map", {}),
     ("result_df",      None),
     ("charges_df",     None),
@@ -855,18 +844,21 @@ if order_file and charges_file:
         fixed_fee, gst_rate,
         replace_map=st.session_state["replace_map"],
         pwn_overrides=st.session_state["pwn_overrides"],
+        sku_corrections=st.session_state["sku_corrections"],
     )
     st.session_state["result_df"] = result_df
     summary_df, cat_df = build_summary(result_df)
 
     # Count how many were resolved by replace map
     replace_resolved = result_df[result_df["PWN Match"].str.startswith("replace", na=False)]
+    sku_corr_count   = int((result_df.get("SKU Corrected", pd.Series(dtype=str)) == "✅ Yes").sum())
 
     st.success(
         f"✅ Processed **{len(result_df):,}** orders  |  "
         f"**{int(result_df['Received Amount'].notna().sum()):,}** calculated  |  "
         f"**{int(result_df['Received Amount'].isna().sum()):,}** skipped (no category/GT match)"
         + (f"  |  **{len(replace_resolved):,}** PWN found via Replace SKU map" if len(replace_resolved) else "")
+        + (f"  |  **{sku_corr_count:,}** SKU(s) corrected manually" if sku_corr_count else "")
     )
 
     # ── Live category map viewer ────────────────────────────────────────────
@@ -892,32 +884,137 @@ if order_file and charges_file:
     # ╚══════════════════════════════════════════════════════════════════╝
     with tab1:
 
-        missing_df = result_df[result_df["PWN Match"] == "not_found"]
-        if len(missing_df):
+        # ── SKU Correction Panel ────────────────────────────────────────────
+        broken_df = result_df[
+            result_df["Received Amount"].isna() | (result_df["PWN Match"] == "not_found")
+        ]
+        if len(broken_df):
+            no_cat = int(broken_df["Received Amount"].isna().sum())
+            no_pwn = int((broken_df["PWN Match"] == "not_found").sum())
+
             with st.expander(
-                f"⚠️  **{len(missing_df)} SKU(s) have no PWN price — click to enter manually**",
+                f"✏️  **{len(broken_df)} SKU(s) have lookup issues — correct SKU name to retry all lookups**",
                 expanded=False,
             ):
-                st.info("Enter PWN value for each SKU and click Save & Recalculate.")
-                missing_skus    = missing_df["SKU"].unique().tolist()
-                override_inputs = {}
-                for sku in missing_skus:
-                    c_label, c_input = st.columns([3, 2])
-                    c_label.markdown(
-                        f"<div style='padding-top:8px;font-size:0.95rem;"
-                        f"word-break:break-all'><b>{sku}</b></div>",
+                st.info(
+                    "Type the **corrected SKU** for each row — the tool will re-run "
+                    "**all** lookups (sub-category → GT → commission → collection → PWN) "
+                    "using the corrected name. Leave blank to keep original."
+                )
+                st.caption(
+                    f"🔴 No category/GT match: **{no_cat}**  |  "
+                    f"🟡 No PWN found: **{no_pwn}**"
+                )
+
+                broken_skus = broken_df["SKU"].unique().tolist()
+                correction_inputs = {}
+
+                # Table-style header row
+                h1, h2, h3, h4 = st.columns([3, 2, 2, 3])
+                h1.markdown("**Original SKU**")
+                h2.markdown("**Issue**")
+                h3.markdown("**Corrected SKU**")
+                h4.markdown("**Live preview (after save)**")
+                st.markdown("---")
+
+                for sku in broken_skus:
+                    sku_rows = broken_df[broken_df["SKU"] == sku]
+                    issues = []
+                    if sku_rows["Received Amount"].isna().any():
+                        issues.append("❌ No category/GT")
+                    if (sku_rows["PWN Match"] == "not_found").any():
+                        issues.append("⚠️ No PWN")
+                    issue_str = "  &  ".join(issues)
+
+                    existing_correction = st.session_state["sku_corrections"].get(sku.upper(), "")
+
+                    c1, c2, c3, c4 = st.columns([3, 2, 2, 3])
+
+                    c1.markdown(
+                        f"<div style='padding-top:6px;font-size:0.88rem;"
+                        f"word-break:break-all'><code>{sku}</code></div>",
                         unsafe_allow_html=True,
                     )
-                    stripped = strip_vendor_prefix(sku)
-                    existing = float(st.session_state["pwn_overrides"].get(stripped.upper(), 0.0))
-                    override_inputs[stripped] = c_input.number_input(
-                        "PWN (₹)", value=existing, min_value=0.0, step=0.5,
-                        label_visibility="collapsed", key=f"pwn_input_{sku}",
+                    c2.markdown(
+                        f"<div style='padding-top:6px;font-size:0.82rem'>{issue_str}</div>",
+                        unsafe_allow_html=True,
                     )
-                if st.button("💾  Save PWN Overrides & Recalculate", type="primary"):
-                    for sku, val in override_inputs.items():
-                        if val > 0:
-                            st.session_state["pwn_overrides"][sku.upper()] = val
+                    corrected = c3.text_input(
+                        "Corrected SKU",
+                        value=existing_correction,
+                        placeholder="e.g. YK1234-L",
+                        label_visibility="collapsed",
+                        key=f"sku_corr_{sku}",
+                    )
+                    correction_inputs[sku] = corrected.strip()
+
+                    # Live preview: show what the saved correction resolves to
+                    if existing_correction:
+                        lookup_sku = strip_vendor_prefix(existing_correction)
+                        sub_cat_preview = st.session_state["sku_cat_dict"].get(lookup_sku.upper(), "")
+                        pwn_v, pwn_m = lookup_pwn_with_replace(
+                            lookup_sku,
+                            st.session_state["pwn_dict"],
+                            st.session_state["replace_map"],
+                        )
+                        cat_resolved = (
+                            st.session_state["cat_map"].get(sub_cat_preview.strip().lower(), "")
+                            or st.session_state["manual_cat_map"].get(sub_cat_preview.strip().lower(), "")
+                        )
+                        status_parts = []
+                        if sub_cat_preview and sub_cat_preview != "nan":
+                            status_parts.append(f"📦 Sub-cat: *{sub_cat_preview}*")
+                        if cat_resolved:
+                            status_parts.append(f"🏷️ Charges cat: *{cat_resolved}*")
+                        if pd.notna(pwn_v):
+                            status_parts.append(f"💰 PWN: ₹{pwn_v:,.2f}")
+                        if status_parts:
+                            preview_html = (
+                                "<div style='padding-top:4px;font-size:0.80rem;color:#1a7a3c;line-height:1.6'>"
+                                + "<br>".join(status_parts)
+                                + "</div>"
+                            )
+                        else:
+                            preview_html = (
+                                "<div style='padding-top:6px;font-size:0.80rem;color:#c0392b'>"
+                                "⚠️ Still unresolved — check SKU spelling"
+                                "</div>"
+                            )
+                        c4.markdown(preview_html, unsafe_allow_html=True)
+                    else:
+                        c4.markdown(
+                            "<div style='padding-top:6px;font-size:0.80rem;color:#aaa'>"
+                            "— type a correction to preview —"
+                            "</div>",
+                            unsafe_allow_html=True,
+                        )
+
+                st.markdown("---")
+                col_save, col_clear = st.columns([2, 1])
+                if col_save.button("💾  Save SKU Corrections & Recalculate", type="primary"):
+                    new_corrections = {}
+                    for orig_sku, corrected_sku in correction_inputs.items():
+                        if corrected_sku:
+                            new_corrections[orig_sku.upper()] = corrected_sku
+                    st.session_state["sku_corrections"] = new_corrections
+                    st.rerun()
+                if col_clear.button("🗑️  Clear All Corrections"):
+                    st.session_state["sku_corrections"] = {}
+                    st.rerun()
+
+        # ── Show existing corrections summary if any ────────────────────────
+        if st.session_state["sku_corrections"]:
+            with st.expander(
+                f"✅  **{len(st.session_state['sku_corrections'])} SKU correction(s) active** — click to view/manage",
+                expanded=False,
+            ):
+                corr_rows = [
+                    {"Original SKU": orig, "→ Corrected SKU": corr}
+                    for orig, corr in st.session_state["sku_corrections"].items()
+                ]
+                st.dataframe(pd.DataFrame(corr_rows), use_container_width=True, hide_index=True)
+                if st.button("🗑️  Clear All Active Corrections", key="clear_corr_summary"):
+                    st.session_state["sku_corrections"] = {}
                     st.rerun()
 
         st.markdown("### 📊 Summary")
@@ -947,7 +1044,8 @@ if order_file and charges_file:
         sel_cat  = f1.selectbox("Sub-Category", all_cats_opt)
         diff_opt = f2.selectbox("Difference type",
                                 ["All", "Positive (+)", "Negative (−)",
-                                 "Zero / Matched", "No PWN data", "No Category (NaN)"])
+                                 "Zero / Matched", "No PWN data", "No Category (NaN)",
+                                 "SKU Corrected ✅"])
         search   = f3.text_input("🔎 Search by SKU or Order ID")
 
         view = result_df.copy()
@@ -963,6 +1061,8 @@ if order_file and charges_file:
             view = view[view["PWN Match"] == "not_found"]
         elif diff_opt == "No Category (NaN)":
             view = view[view["Received Amount"].isna()]
+        elif diff_opt == "SKU Corrected ✅":
+            view = view[view.get("SKU Corrected", pd.Series(dtype=str)) == "✅ Yes"]
         if search.strip():
             mask = (
                 view["SKU"].str.contains(search.strip(), case=False, na=False) |
@@ -973,7 +1073,7 @@ if order_file and charges_file:
         st.caption(f"Showing **{len(view):,}** of **{len(result_df):,}** orders")
 
         display_cols = [
-            "Order Id", "SKU", "Lookup SKU", "Ordered On",
+            "Order Id", "SKU", "Lookup SKU", "SKU Corrected", "Ordered On",
             "Sub-Category", "Charges Category",
             "Qty", "Invoice Amount",
             "GT (As Per Calc)", "Selling Price",
@@ -1120,10 +1220,11 @@ else:
 
 | # | Feature |
 |---|---------|
-| 1 | **Replace SKU fallback** — if PWN not found by SKU, look up via Replace SKU sheet (Seller SKU → OMS SKU) and retry |
-| 2 | **TDS & TCS deducted** — Taxable Value = SP − SP/105×5; TDS = 0.1%, TCS = 0.5% |
-| 3 | **Qty-aware Difference** — Difference = Received Amount − (Qty × PWN) |
-| 4 | **Beautiful styled Excel** — navy headers, alternating rows, red/green diff colouring, total row |
+| 1 | **SKU Name Correction** — fix a typo/wrong SKU and re-run ALL lookups (category, GT, commission, collection, PWN) automatically |
+| 2 | **Replace SKU fallback** — if PWN not found by SKU, look up via Replace SKU sheet (Seller SKU → OMS SKU) and retry |
+| 3 | **TDS & TCS deducted** — Taxable Value = SP − SP/105×5; TDS = 0.1%, TCS = 0.5% |
+| 4 | **Qty-aware Difference** — Difference = Received Amount − (Qty × PWN) |
+| 5 | **Beautiful styled Excel** — navy headers, alternating rows, red/green diff colouring, total row |
 
 ---
 ### Calculation per order
