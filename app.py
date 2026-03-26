@@ -32,7 +32,11 @@ st.caption("Yash Gallery Private Limited — Tool made by Ashu Bhatt | Finance T
 # ═══════════════════════════════════════════════════════════════════════════════
 with st.sidebar:
     st.header("📂 Upload Files")
-    order_file      = st.file_uploader("1️⃣  Order CSV  (Flipkart export)", type=["csv"])
+    order_files      = st.file_uploader(
+        "1️⃣  Order File(s)  (CSV / XLSX / XLS — multiple allowed)",
+        type=["csv", "xlsx", "xls"],
+        accept_multiple_files=True,
+    )
     charges_file    = st.file_uploader("2️⃣  Data Excel", type=["xlsx"])
     replace_sku_file = st.file_uploader("3️⃣  Replace SKU Excel (optional override)", type=["xlsx"])
     st.markdown("---")
@@ -130,26 +134,79 @@ def strip_vendor_prefix(sku: str) -> str:
     return sku
 
 
+def get_sku_base(sku: str) -> str:
+    """
+    Extract the base part of a SKU by stripping the trailing size token.
+    e.g.  '1006YKBLUE-5XL'  →  '1006YKBLUE'
+          '1006YKBLUE - XL'  →  '1006YKBLUE'  (handles spaces around hyphen)
+    Returns the full SKU unchanged if no size suffix is detected.
+    """
+    import re
+    # Normalise spaces around the last hyphen
+    key = re.sub(r"\s*-\s*", "-", sku.strip().upper())
+    parts = key.rsplit("-", 1)
+    if len(parts) == 2:
+        return parts[0]
+    return key
+
+
+def lookup_cat_by_base(sku: str, sku_cat_dict: dict) -> tuple[str, str]:
+    """
+    Try to find a sub-category for `sku` by matching its base code against
+    any key in sku_cat_dict that shares the same base.
+    e.g. sku = '1006YKBLUE-5XL'  → base = '1006YKBLUE'
+         matches '1006YKBLUE-XL', '1006YKBLUE-XXL', etc.
+    Returns (sub_category, matched_sku) or ("", "") if nothing found.
+    """
+    base = get_sku_base(sku)
+    if not base:
+        return "", ""
+    for candidate_sku, sub_cat in sku_cat_dict.items():
+        if get_sku_base(candidate_sku) == base and sub_cat and sub_cat != "nan":
+            return sub_cat, candidate_sku
+    return "", ""
+
+
 def lookup_pwn(sku: str, pwn_dict: dict) -> tuple:
+    """
+    Look up PWN for `sku`.
+    Order of attempts:
+      1. Direct match
+      2. Size-expand  (e.g. order size L → price-sheet size L-XL)
+      3. Base-code match — any entry in pwn_dict sharing the same base code
+    Returns (pwn_value, method_string).
+    """
     key = sku.strip().upper()
+
+    # 1 — direct
     val = pwn_dict.get(key)
     if pd.notna(val):
         return float(val), "direct"
+
+    # 2 — size-expand
     parts = key.rsplit("-", 1)
     if len(parts) == 2:
         base, size = parts
         for price_size in ORDER_TO_PRICE_SIZE.get(size, []):
             val = pwn_dict.get(f"{base}-{price_size.upper()}")
             if pd.notna(val):
-                return float(val), price_size
+                return float(val), f"size-expand({price_size})"
+
+    # 3 — base-code fallback: find any PWN entry with the same base
+    base = get_sku_base(key)
+    if base:
+        for candidate, cval in pwn_dict.items():
+            if get_sku_base(candidate) == base and pd.notna(cval):
+                return float(cval), f"base-match({candidate})"
+
     return np.nan, "not_found"
 
 
 def lookup_pwn_with_replace(sku: str, pwn_dict: dict, replace_map: dict) -> tuple:
     """
-    Try direct/size-expand lookup first.
+    Try direct / size-expand / base-code lookup first.
     If not found, try replacing the Seller SKU → OMS SKU via replace_map,
-    then retry the lookup on the mapped OMS SKU.
+    then retry the full lookup on the mapped OMS SKU.
     """
     pwn_val, method = lookup_pwn(sku, pwn_dict)
     if method != "not_found":
@@ -270,6 +327,86 @@ def parse_replace_map(file) -> dict:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# MULTI-FILE ORDER READER
+# ═══════════════════════════════════════════════════════════════════════════════
+
+REQUIRED_ORDER_COLS = {"Order Id", "SKU", "Invoice Amount", "Quantity"}
+
+def read_order_file(f) -> tuple[pd.DataFrame, str]:
+    """
+    Read one uploaded order file (CSV, XLSX or XLS).
+    Returns (dataframe, error_string).  error_string is "" on success.
+    Auto-detects format by file extension / MIME type.
+    Standardises column names by stripping whitespace.
+    """
+    name = f.name.lower()
+    try:
+        if name.endswith(".csv"):
+            # Try common encodings
+            raw = f.read()
+            for enc in ("utf-8", "utf-8-sig", "latin-1", "cp1252"):
+                try:
+                    df = pd.read_csv(BytesIO(raw), encoding=enc)
+                    break
+                except UnicodeDecodeError:
+                    continue
+            else:
+                return pd.DataFrame(), f"Could not decode '{f.name}' with any known encoding."
+        elif name.endswith(".xlsx") or name.endswith(".xls"):
+            engine = "openpyxl" if name.endswith(".xlsx") else "xlrd"
+            # Try reading — if first row looks like a header, great; otherwise skip 0 rows
+            df = pd.read_excel(f, engine=engine)
+        else:
+            return pd.DataFrame(), f"Unsupported file type: '{f.name}'"
+
+        # Standardise column names
+        df.columns = [str(c).strip() for c in df.columns]
+
+        # Check required columns
+        missing = REQUIRED_ORDER_COLS - set(df.columns)
+        if missing:
+            return pd.DataFrame(), (
+                f"'{f.name}' is missing required columns: {', '.join(sorted(missing))}"
+            )
+
+        # Add source file column for traceability
+        df["_source_file"] = f.name
+        return df, ""
+
+    except Exception as e:
+        return pd.DataFrame(), f"Error reading '{f.name}': {e}"
+
+
+def load_all_order_files(files) -> tuple[pd.DataFrame, list[dict], list[str]]:
+    """
+    Reads all uploaded order files, concatenates them.
+    Returns:
+      - combined DataFrame
+      - list of per-file info dicts  {name, rows, status}
+      - list of error strings (empty if all ok)
+    """
+    frames      = []
+    file_info   = []
+    errors      = []
+
+    for f in files:
+        df, err = read_order_file(f)
+        if err:
+            errors.append(err)
+            file_info.append({"File": f.name, "Rows": 0, "Status": "❌ Error"})
+        else:
+            frames.append(df)
+            file_info.append({"File": f.name, "Rows": len(df), "Status": "✅ OK"})
+
+    if frames:
+        combined = pd.concat(frames, ignore_index=True)
+    else:
+        combined = pd.DataFrame()
+
+    return combined, file_info, errors
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # CORE RECONCILIATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -291,26 +428,38 @@ def run_reconciliation(order_df, charges_df, sku_cat_dict, pwn_dict,
         corrected_raw = sku_corrections.get(raw_sku.upper(), raw_sku)
         sku           = strip_vendor_prefix(corrected_raw)
 
-        order_id   = str(row.get("Order Id", "")).strip()
-        ordered_on = row.get("Ordered On", "")
-        inv_amount = float(row.get("Invoice Amount", 0) or 0)
-        quantity   = int(row.get("Quantity", 1) or 1)
+        order_id    = str(row.get("Order Id", "")).strip()
+        ordered_on  = row.get("Ordered On", "")
+        inv_amount  = float(row.get("Invoice Amount", 0) or 0)
+        quantity    = int(row.get("Quantity", 1) or 1)
+        source_file = str(row.get("_source_file", "")).strip()
 
-        sub_cat_raw = sku_cat_dict.get(sku.upper(), "")
-        cat         = get_cat_for_lookup(sub_cat_raw, cat_map, manual_cat_map)
-        gt_val      = get_gt_amount(cat, inv_amount, charges_df) if cat else np.nan
+        # ── Category lookup: exact → base-code fallback ──────────────────
+        sub_cat_raw    = sku_cat_dict.get(sku.upper(), "")
+        cat_match_note = ""
+
+        if not sub_cat_raw or sub_cat_raw == "nan":
+            # Try base-code fallback in the category sheet
+            fallback_sub, fallback_sku = lookup_cat_by_base(sku, sku_cat_dict)
+            if fallback_sub:
+                sub_cat_raw    = fallback_sub
+                cat_match_note = f"base-cat({fallback_sku})"
+
+        cat    = get_cat_for_lookup(sub_cat_raw, cat_map, manual_cat_map)
+        gt_val = get_gt_amount(cat, inv_amount, charges_df) if cat else np.nan
 
         if pd.isna(gt_val) or not cat:
-            sell_price     = np.nan
-            gt_val         = np.nan
-            commission     = coll_fee = total_charges = np.nan
-            gst_on_charges = np.nan
-            taxable_value  = np.nan
-            tds            = np.nan
-            tcs            = np.nan
+            sell_price       = np.nan
+            gt_val           = np.nan
+            commission       = coll_fee = total_charges = np.nan
+            gst_on_charges   = np.nan
+            taxable_value    = np.nan
+            tds              = np.nan
+            tcs              = np.nan
             total_deductions = received_amount = np.nan
         else:
-            sell_price       = round((inv_amount - gt_val) * quantity, 5)
+            # ── Selling Price = Invoice Amount − GT  (NO Qty multiply) ───
+            sell_price       = round(inv_amount - gt_val, 5)
             commission       = get_commission(cat, sell_price, charges_df)
             coll_fee         = get_collection_fee(cat, sell_price, charges_df)
             total_charges    = round(commission + coll_fee + float(fixed_fee), 5)
@@ -321,24 +470,30 @@ def run_reconciliation(order_df, charges_df, sku_cat_dict, pwn_dict,
             tds              = calc_tds(taxable_value)
             tcs              = calc_tcs(taxable_value)
 
-            # Received Amount = Selling Price − Total Charges − GST on Charges − TDS − TCS
+            # Received Amount = Selling Price − Total Charges − GST − TDS − TCS
             total_deductions = round(total_charges + gst_on_charges + tds + tcs, 5)
             received_amount  = round(sell_price - total_charges - gst_on_charges - tds - tcs, 5)
 
-        # PWN lookup — with Replace map fallback
+        # ── PWN lookup — with Replace map + base-code fallbacks ──────────
         pwn_val, match_method = lookup_pwn_with_replace(sku, pwn_dict, replace_map)
         if sku.upper() in pwn_overrides:
             pwn_val, match_method = float(pwn_overrides[sku.upper()]), "manual"
 
-        # Difference — if Qty > 1, use Qty × PWN as the benchmark
+        # Combine category match note into PWN match column for traceability
+        full_match_note = match_method
+        if cat_match_note:
+            full_match_note = f"{match_method} | cat:{cat_match_note}"
+
+        # ── Difference: Received Amount − (Qty × PWN) ────────────────────
+        # PWN Benchmark uses Qty because you ordered N units, so expected = N × PWN
         if pd.notna(received_amount) and pd.notna(pwn_val):
-            pwn_benchmark = pwn_val * quantity  # Qty × PWN
+            pwn_benchmark = round(pwn_val * quantity, 5)
             difference    = round(received_amount - pwn_benchmark, 5)
         else:
             pwn_benchmark = np.nan
             difference    = np.nan
 
-        # Track whether this row used a correction
+        # Track whether this row used a SKU correction
         was_corrected = raw_sku.upper() in sku_corrections
 
         rows_out.append({
@@ -346,6 +501,7 @@ def run_reconciliation(order_df, charges_df, sku_cat_dict, pwn_dict,
             "SKU":              raw_sku,
             "Lookup SKU":       sku,
             "SKU Corrected":    "✅ Yes" if was_corrected else "",
+            "Source File":      source_file,
             "Ordered On":       ordered_on,
             "Sub-Category":     sub_cat_raw,
             "Charges Category": cat,
@@ -365,7 +521,7 @@ def run_reconciliation(order_df, charges_df, sku_cat_dict, pwn_dict,
             "Received Amount":  received_amount,
             "PWN":              pwn_val,
             "PWN Benchmark":    pwn_benchmark,
-            "PWN Match":        match_method,
+            "PWN Match":        full_match_note,
             "Difference":       difference,
         })
 
@@ -483,10 +639,10 @@ def apply_roc_sheet_style(ws, df: pd.DataFrame):
 
         formulas = {}
 
-        if sp and inv and gt and qty:
+        if sp and inv and gt:
             formulas["Selling Price"] = (
                 f'=IF(OR({gt}{r}="",{gt}{r}=0),"",'
-                f'ROUND(({inv}{r}-{gt}{r})*{qty}{r},2))'
+                f'ROUND({inv}{r}-{gt}{r},2))'
             )
         if tc and com and colf and ff:
             formulas["Total Charges"] = (
@@ -765,10 +921,28 @@ for k, v in [
 # ═══════════════════════════════════════════════════════════════════════════════
 # MAIN
 # ═══════════════════════════════════════════════════════════════════════════════
-if order_file and charges_file:
+if order_files and charges_file:
 
     with st.spinner("🔄 Reading files…"):
-        order_df = pd.read_csv(order_file)
+        # ── Load & merge all order files ────────────────────────────────────
+        order_df, file_info, file_errors = load_all_order_files(order_files)
+
+        # Show per-file breakdown in sidebar
+        st.sidebar.markdown("---")
+        st.sidebar.markdown("**📄 Uploaded Order Files**")
+        fi_df = pd.DataFrame(file_info)
+        st.sidebar.dataframe(fi_df, hide_index=True, use_container_width=True)
+        total_order_rows = len(order_df)
+        st.sidebar.caption(f"Total rows loaded: **{total_order_rows:,}**")
+
+        if file_errors:
+            for err in file_errors:
+                st.warning(f"⚠️ {err}")
+
+        if order_df.empty:
+            st.error("❌ No valid order rows could be loaded from the uploaded file(s). Check column names.")
+            st.stop()
+
         xl       = pd.read_excel(charges_file, sheet_name=None, header=None)
         sheets   = list(xl.values())
 
@@ -1039,18 +1213,22 @@ if order_file and charges_file:
 
         st.markdown("---")
 
-        f1, f2, f3 = st.columns([2, 2, 3])
+        f1, f2, f3, f4 = st.columns([2, 2, 2, 3])
         all_cats_opt = ["All"] + sorted(result_df["Sub-Category"].dropna().unique().tolist())
         sel_cat  = f1.selectbox("Sub-Category", all_cats_opt)
         diff_opt = f2.selectbox("Difference type",
                                 ["All", "Positive (+)", "Negative (−)",
                                  "Zero / Matched", "No PWN data", "No Category (NaN)",
                                  "SKU Corrected ✅"])
-        search   = f3.text_input("🔎 Search by SKU or Order ID")
+        all_sources = ["All"] + sorted(result_df["Source File"].dropna().unique().tolist())
+        sel_source = f3.selectbox("Source File", all_sources)
+        search   = f4.text_input("🔎 Search by SKU or Order ID")
 
         view = result_df.copy()
         if sel_cat != "All":
             view = view[view["Sub-Category"] == sel_cat]
+        if sel_source != "All":
+            view = view[view["Source File"] == sel_source]
         if diff_opt == "Positive (+)":
             view = view[view["Difference"] > 0]
         elif diff_opt == "Negative (−)":
@@ -1073,7 +1251,7 @@ if order_file and charges_file:
         st.caption(f"Showing **{len(view):,}** of **{len(result_df):,}** orders")
 
         display_cols = [
-            "Order Id", "SKU", "Lookup SKU", "SKU Corrected", "Ordered On",
+            "Order Id", "SKU", "Lookup SKU", "SKU Corrected", "Source File", "Ordered On",
             "Sub-Category", "Charges Category",
             "Qty", "Invoice Amount",
             "GT (As Per Calc)", "Selling Price",
@@ -1196,16 +1374,27 @@ if order_file and charges_file:
 # LANDING SCREEN
 # ═══════════════════════════════════════════════════════════════════════════════
 else:
-    st.info("👈 Upload **both files** in the sidebar to begin.")
+    st.info("👈 Upload **order file(s)** and the **Data Excel** in the sidebar to begin.")
     st.markdown("""
 ---
 ### How it works
 
 | File | Description |
 |------|-------------|
-| **Order CSV** | Flipkart Seller Hub export — needs: `Order Id`, `SKU`, `Ordered On`, `Invoice Amount`, `Quantity` |
+| **Order File(s)** | Flipkart Seller Hub export — CSV, XLSX or XLS. Upload **one or more** files and they are merged automatically. Needs columns: `Order Id`, `SKU`, `Ordered On`, `Invoice Amount`, `Quantity` |
 | **Data Excel** | Yash Gallery workbook — 3 sheets by position (see below) |
 | **Replace SKU Excel** *(optional)* | Maps Seller SKU Id → OMS SKU for PWN fallback lookup |
+
+**Supported order file formats:**
+
+| Format | Extension | Notes |
+|--------|-----------|-------|
+| CSV | `.csv` | Auto-detects encoding (UTF-8, Latin-1, CP1252) |
+| Excel Workbook | `.xlsx` | Reads first sheet |
+| Legacy Excel | `.xls` | Reads first sheet |
+
+> Upload multiple files at once — they will be **merged into one dataset** automatically.
+> A **Source File** column tracks which row came from which file.
 
 **Excel sheet positions:**
 
@@ -1220,18 +1409,21 @@ else:
 
 | # | Feature |
 |---|---------|
-| 1 | **SKU Name Correction** — fix a typo/wrong SKU and re-run ALL lookups (category, GT, commission, collection, PWN) automatically |
-| 2 | **Replace SKU fallback** — if PWN not found by SKU, look up via Replace SKU sheet (Seller SKU → OMS SKU) and retry |
-| 3 | **TDS & TCS deducted** — Taxable Value = SP − SP/105×5; TDS = 0.1%, TCS = 0.5% |
-| 4 | **Qty-aware Difference** — Difference = Received Amount − (Qty × PWN) |
-| 5 | **Beautiful styled Excel** — navy headers, alternating rows, red/green diff colouring, total row |
+| 1 | **Multi-file order upload** — upload any number of CSV / XLSX / XLS order files; merged automatically with source tracking |
+| 2 | **SKU Name Correction** — fix a typo/wrong SKU and re-run ALL lookups (category, GT, commission, collection, PWN) automatically |
+| 3 | **Replace SKU fallback** — if PWN not found by SKU, look up via Replace SKU sheet (Seller SKU → OMS SKU) and retry |
+| 4 | **TDS & TCS deducted** — Taxable Value = SP − SP/105×5; TDS = 0.1%, TCS = 0.5% |
+| 5 | **Qty-aware Difference** — Difference = Received Amount − (Qty × PWN) |
+| 6 | **Beautiful styled Excel** — navy headers, alternating rows, red/green diff colouring, total row |
 
 ---
 ### Calculation per order
 
 ```
 GT Amount        = Fixed ₹ from GT slab     (Invoice Amount → slab lookup)
-Selling Price    = (Invoice Amount − GT Amount) × Qty
+Selling Price    = Invoice Amount − GT Amount   ← NO Qty multiply (Flipkart
+                                                   Invoice Amount already covers
+                                                   all units in the shipment)
 
 Commission       = Selling Price × Commission %   (slab by Selling Price)
 Collection Fee   = Selling Price × Collection %   (slab by Selling Price)
@@ -1245,7 +1437,17 @@ TCS              = Taxable Value × 0.5%
 
 Received Amount  = Selling Price − Total Charges − GST − TDS − TCS
 
-PWN Benchmark    = PWN × Qty   (if Qty > 1)
+PWN Benchmark    = Qty × PWN   (expected revenue for all units at our price)
 Difference       = Received Amount − PWN Benchmark
 ```
+
+**SKU lookup priority (auto, no manual input needed):**
+
+| Step | What is tried |
+|------|--------------|
+| 1 | Exact SKU match in Category / PWN sheets |
+| 2 | Size-expand (e.g. order size `L` → price-sheet range `L-XL`) |
+| 3 | **Base-code match** — strips size suffix and finds any other size of the same product (e.g. `1006YKBLUE-5XL` → matches `1006YKBLUE-XL`) |
+| 4 | Replace SKU map (Seller SKU → OMS SKU) + repeat steps 1-3 |
+| 5 | Manual SKU correction panel |
 """)
