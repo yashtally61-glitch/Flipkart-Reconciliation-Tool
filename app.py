@@ -51,14 +51,13 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("""
 **Excel sheet layout (by position):**
-- **Sheet 0** — Charges Decription (category-based fallback)
-- **Sheet 1** — Category Discription
-- **Sheet 2** — Price We Need
-- **Sheet 3** — Brand Charges ✨ NEW
+- **Sheet 0** — Charges Description (Brand + Category based rates)
+- **Sheet 1** — Category Description (SKU → Sub-category)
+- **Sheet 2** — Price We Need (PWN prices)
 
-> **Brand-based charging:** Rates are looked up by brand name 
-> extracted from Product column. Falls back to category if 
-> brand not found.
+> **Brand-based charging:** Brand is read from the **Product** column  
+> in the Order File. Rates are looked up by **Brand + Category**  
+> from Sheet 0. Falls back to category-only if brand not found.
 """)
     st.markdown("""
 **TDS / TCS rates (fixed):**
@@ -97,39 +96,30 @@ VENDOR_PREFIXES = ["GWN-", "GWN_", "GWN", "SPF-", "SPF_", "SPF", "KL_", "KL-", "
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# BRAND EXTRACTION
+# BRAND EXTRACTION FROM PRODUCT COLUMN (ORDER FILE)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def extract_brand_from_product(product: str) -> str:
+def extract_brand_from_product(product: str, known_brands: list) -> str:
     """
-    Extract brand name from Product column.
-    Examples:
-      "Yash Gallery Women Floral Print..." → "Yash Gallery"
-      "KALINI Women Fit and Flare..." → "KALINI"
-      "Tasrika Women Printed..." → "Tasrika Women"
+    Extract brand name from Product column in the Order File.
+    Tries to match against known brands (from Sheet 0) first,
+    then falls back to first 1-2 capitalized words.
     """
     if not product or product == "nan" or pd.isna(product):
         return ""
-    
+
     product = str(product).strip()
-    
-    # Known brand patterns
-    if product.startswith("Yash Gallery"):
-        return "Yash Gallery"
-    elif product.startswith("KALINI"):
-        return "KALINI"
-    elif product.startswith("Tasrika"):
-        return "Tasrika Women"
-    elif product.startswith("Fasense"):
-        return "Fasense"
-    else:
-        # Fallback: take first 1-2 words
-        words = product.split()
-        if len(words) >= 2:
-            # Check if first two words look like a brand (capitalized)
-            if words[0][0].isupper() and words[1][0].isupper():
-                return f"{words[0]} {words[1]}"
-        return words[0] if words else ""
+
+    # Match against known brands (longest match first to avoid partial hits)
+    for brand in sorted(known_brands, key=len, reverse=True):
+        if product.lower().startswith(brand.lower()):
+            return brand
+
+    # Fallback: take first 1-2 words if capitalized
+    words = product.split()
+    if len(words) >= 2 and words[0][0].isupper() and words[1][0].isupper():
+        return f"{words[0]} {words[1]}"
+    return words[0] if words else ""
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -166,21 +156,13 @@ def strip_vendor_prefix(sku: str) -> str:
         if upper.startswith(prefix.upper()):
             sku = sku[len(prefix):]
             break
-    # Replace YKN and YKC → YK anywhere in the SKU (case-insensitive)
     sku = re.sub(r"(?i)YKN", "YK", sku)
     sku = re.sub(r"(?i)YKC", "YK", sku)
     return sku
 
 
 def get_sku_base(sku: str) -> str:
-    """
-    Extract the base part of a SKU by stripping the trailing size token.
-    e.g.  '1006YKBLUE-5XL'  →  '1006YKBLUE'
-          '1006YKBLUE - XL'  →  '1006YKBLUE'  (handles spaces around hyphen)
-    Returns the full SKU unchanged if no size suffix is detected.
-    """
     import re
-    # Normalise spaces around the last hyphen
     key = re.sub(r"\s*-\s*", "-", sku.strip().upper())
     parts = key.rsplit("-", 1)
     if len(parts) == 2:
@@ -189,13 +171,6 @@ def get_sku_base(sku: str) -> str:
 
 
 def lookup_cat_by_base(sku: str, sku_cat_dict: dict) -> tuple[str, str]:
-    """
-    Try to find a sub-category for `sku` by matching its base code against
-    any key in sku_cat_dict that shares the same base.
-    e.g. sku = '1006YKBLUE-5XL'  → base = '1006YKBLUE'
-         matches '1006YKBLUE-XL', '1006YKBLUE-XXL', etc.
-    Returns (sub_category, matched_sku) or ("", "") if nothing found.
-    """
     base = get_sku_base(sku)
     if not base:
         return "", ""
@@ -206,22 +181,12 @@ def lookup_cat_by_base(sku: str, sku_cat_dict: dict) -> tuple[str, str]:
 
 
 def lookup_pwn(sku: str, pwn_dict: dict) -> tuple:
-    """
-    Look up PWN for `sku`.
-    Order of attempts:
-      1. Direct match
-      2. Size-expand  (e.g. order size L → price-sheet size L-XL)
-      3. Base-code match — any entry in pwn_dict sharing the same base code
-    Returns (pwn_value, method_string).
-    """
     key = sku.strip().upper()
 
-    # 1 — direct
     val = pwn_dict.get(key)
     if pd.notna(val):
         return float(val), "direct"
 
-    # 2 — size-expand
     parts = key.rsplit("-", 1)
     if len(parts) == 2:
         base, size = parts
@@ -230,7 +195,6 @@ def lookup_pwn(sku: str, pwn_dict: dict) -> tuple:
             if pd.notna(val):
                 return float(val), f"size-expand({price_size})"
 
-    # 3 — base-code fallback: find any PWN entry with the same base
     base = get_sku_base(key)
     if base:
         for candidate, cval in pwn_dict.items():
@@ -241,16 +205,10 @@ def lookup_pwn(sku: str, pwn_dict: dict) -> tuple:
 
 
 def lookup_pwn_with_replace(sku: str, pwn_dict: dict, replace_map: dict) -> tuple:
-    """
-    Try direct / size-expand / base-code lookup first.
-    If not found, try replacing the Seller SKU → OMS SKU via replace_map,
-    then retry the full lookup on the mapped OMS SKU.
-    """
     pwn_val, method = lookup_pwn(sku, pwn_dict)
     if method != "not_found":
         return pwn_val, method
 
-    # Try replace map: Seller SKU Id → OMS SKU
     upper_sku = sku.strip().upper()
     oms_sku = replace_map.get(upper_sku)
     if oms_sku:
@@ -262,15 +220,18 @@ def lookup_pwn_with_replace(sku: str, pwn_dict: dict, replace_map: dict) -> tupl
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# BRAND-BASED CHARGE LOOKUP
+# BRAND + CATEGORY CHARGE LOOKUP (Sheet 0 has both Brand Name and Category)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def get_brand_gt_amount(brand: str, inv_amount: float, brand_df: pd.DataFrame) -> float:
-    """Lookup GT charge from brand-based rates"""
-    if not brand or brand_df is None or brand_df.empty:
+def get_brand_cat_gt_amount(brand: str, cat: str, inv_amount: float, charges_df: pd.DataFrame) -> float:
+    """Lookup GT charge by Brand Name + Category from Sheet 0."""
+    if not brand or not cat or charges_df is None or charges_df.empty:
         return np.nan
-    
-    rows = brand_df[brand_df["Brand Name"].str.lower() == brand.strip().lower()]
+
+    rows = charges_df[
+        (charges_df["Brand Name"].str.lower() == brand.strip().lower()) &
+        (charges_df["Category"].str.lower() == cat.strip().lower())
+    ]
     for _, r in rows.iterrows():
         lo = r.get("GT Lower Limit")
         hi = r.get("GT Upper Limit")
@@ -281,12 +242,15 @@ def get_brand_gt_amount(brand: str, inv_amount: float, brand_df: pd.DataFrame) -
     return np.nan
 
 
-def get_brand_commission(brand: str, sell: float, brand_df: pd.DataFrame) -> float:
-    """Lookup commission from brand-based rates"""
-    if not brand or brand_df is None or brand_df.empty:
+def get_brand_cat_commission(brand: str, cat: str, sell: float, charges_df: pd.DataFrame) -> float:
+    """Lookup commission by Brand Name + Category from Sheet 0."""
+    if not brand or not cat or charges_df is None or charges_df.empty:
         return np.nan
-    
-    rows = brand_df[brand_df["Brand Name"].str.lower() == brand.strip().lower()]
+
+    rows = charges_df[
+        (charges_df["Brand Name"].str.lower() == brand.strip().lower()) &
+        (charges_df["Category"].str.lower() == cat.strip().lower())
+    ]
     for _, r in rows.iterrows():
         lo = r.get("Lower Limit Commision")
         hi = r.get("Upper Limit Commision")
@@ -297,12 +261,15 @@ def get_brand_commission(brand: str, sell: float, brand_df: pd.DataFrame) -> flo
     return np.nan
 
 
-def get_brand_collection_fee(brand: str, sell: float, brand_df: pd.DataFrame) -> float:
-    """Lookup collection fee from brand-based rates"""
-    if not brand or brand_df is None or brand_df.empty:
+def get_brand_cat_collection_fee(brand: str, cat: str, sell: float, charges_df: pd.DataFrame) -> float:
+    """Lookup collection fee by Brand Name + Category from Sheet 0."""
+    if not brand or not cat or charges_df is None or charges_df.empty:
         return np.nan
-    
-    rows = brand_df[brand_df["Brand Name"].str.lower() == brand.strip().lower()]
+
+    rows = charges_df[
+        (charges_df["Brand Name"].str.lower() == brand.strip().lower()) &
+        (charges_df["Category"].str.lower() == cat.strip().lower())
+    ]
     for _, r in rows.iterrows():
         lo_raw = r.get("Collection Lower Limit")
         hi     = r.get("Collection Upper Limit")
@@ -315,9 +282,9 @@ def get_brand_collection_fee(brand: str, sell: float, brand_df: pd.DataFrame) ->
     return np.nan
 
 
-# Category-based fallback functions (unchanged)
-def get_gt_amount(cat: str, inv_amount: float, cdf: pd.DataFrame) -> float:
-    rows = cdf[cdf["Category"].str.lower() == cat.strip().lower()]
+# Category-only fallback functions (for when brand not found in Sheet 0)
+def get_gt_amount(cat: str, inv_amount: float, charges_df: pd.DataFrame) -> float:
+    rows = charges_df[charges_df["Category"].str.lower() == cat.strip().lower()]
     for _, r in rows.iterrows():
         lo = r.get("GT Lower Limit")
         hi = r.get("GT Upper Limit")
@@ -328,8 +295,8 @@ def get_gt_amount(cat: str, inv_amount: float, cdf: pd.DataFrame) -> float:
     return np.nan
 
 
-def get_commission(cat: str, sell: float, cdf: pd.DataFrame) -> float:
-    rows = cdf[cdf["Category"].str.lower() == cat.strip().lower()]
+def get_commission(cat: str, sell: float, charges_df: pd.DataFrame) -> float:
+    rows = charges_df[charges_df["Category"].str.lower() == cat.strip().lower()]
     for _, r in rows.iterrows():
         lo = r.get("Lower Limit Commision")
         hi = r.get("Upper Limit Commision")
@@ -340,8 +307,8 @@ def get_commission(cat: str, sell: float, cdf: pd.DataFrame) -> float:
     return 0.0
 
 
-def get_collection_fee(cat: str, sell: float, cdf: pd.DataFrame) -> float:
-    rows = cdf[cdf["Category"].str.lower() == cat.strip().lower()]
+def get_collection_fee(cat: str, sell: float, charges_df: pd.DataFrame) -> float:
+    rows = charges_df[charges_df["Category"].str.lower() == cat.strip().lower()]
     for _, r in rows.iterrows():
         lo_raw = r.get("Collection Lower Limit")
         hi     = r.get("Collection Upper Limit")
@@ -355,7 +322,6 @@ def get_collection_fee(cat: str, sell: float, cdf: pd.DataFrame) -> float:
 
 
 def calc_taxable_value(selling_price: float) -> float:
-    """Taxable Value = Selling Price - (Selling Price / 105 * 5)"""
     return selling_price - (selling_price / 105 * 5)
 
 
@@ -372,10 +338,18 @@ def calc_tcs(taxable_value: float, rate: float = 0.005) -> float:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def parse_charges_df(raw: pd.DataFrame) -> pd.DataFrame:
+    """
+    Parse Sheet 0: has Brand Name + Category + commission/collection/GT slabs.
+    Header is in row 0, data starts from row 1.
+    """
     df = raw.copy()
     df.columns = raw.iloc[0].tolist()
     df = df.iloc[1:].reset_index(drop=True)
+    # Keep rows where Category is present
     df = df[df["Category"].notna()].copy()
+    # Forward-fill Brand Name and Category if they span multiple slab rows
+    if "Brand Name" in df.columns:
+        df["Brand Name"] = df["Brand Name"].ffill()
     df["Category"] = df["Category"].ffill()
     numeric_cols = [
         "Lower Limit Commision", "Upper Limit Commision", "Commision Charge",
@@ -388,32 +362,29 @@ def parse_charges_df(raw: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def parse_brand_charges_df(raw: pd.DataFrame) -> pd.DataFrame:
-    """Parse Brand Charges sheet (Sheet 3)"""
+def parse_sku_cat(raw: pd.DataFrame) -> tuple[dict, dict]:
+    """
+    Parse Sheet 1 (Category Discription): Seller SKU Id → Sub-category.
+    Also returns sku → brand mapping if Brand column exists.
+    Returns (sku_cat_dict, sku_brand_dict).
+    """
     df = raw.copy()
     df.columns = raw.iloc[0].tolist()
     df = df.iloc[1:].reset_index(drop=True)
-    df = df[df["Brand Name"].notna()].copy()
-    
-    numeric_cols = [
-        "Lower Limit Commision", "Upper Limit Commision", "Commision Charge",
-        "Collection Lower Limit", "Collection Upper Limit", "Collection Charge",
-        "GT Lower Limit", "GT Upper Limit", "GT Charge",
-    ]
-    for col in numeric_cols:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-    return df
 
-
-def parse_sku_cat(raw: pd.DataFrame) -> dict:
-    df = raw.copy()
-    df.columns = raw.iloc[0].tolist()
-    df = df.iloc[1:].reset_index(drop=True)
-    return dict(zip(
+    sku_cat_dict = dict(zip(
         df["Seller SKU Id"].astype(str).str.strip().str.upper(),
         df["Sub-category"].astype(str).str.strip(),
     ))
+
+    sku_brand_dict = {}
+    if "Brand" in df.columns:
+        sku_brand_dict = dict(zip(
+            df["Seller SKU Id"].astype(str).str.strip().str.upper(),
+            df["Brand"].astype(str).str.strip(),
+        ))
+
+    return sku_cat_dict, sku_brand_dict
 
 
 def parse_pwn_dict(raw: pd.DataFrame) -> dict:
@@ -426,7 +397,6 @@ def parse_pwn_dict(raw: pd.DataFrame) -> dict:
 
 
 def parse_replace_map(file) -> dict:
-    """Parse Replace_SKU.xlsx: Seller SKU Id → OMS SKU (uppercase keys)."""
     xl = pd.read_excel(file, header=None)
     df = xl.copy()
     df.columns = xl.iloc[0].tolist()
@@ -444,16 +414,9 @@ def parse_replace_map(file) -> dict:
 REQUIRED_ORDER_COLS = {"Order Id", "SKU", "Invoice Amount", "Quantity", "Product"}
 
 def read_order_file(f) -> tuple[pd.DataFrame, str]:
-    """
-    Read one uploaded order file (CSV, XLSX or XLS).
-    Returns (dataframe, error_string).  error_string is "" on success.
-    Auto-detects format by file extension / MIME type.
-    Standardises column names by stripping whitespace.
-    """
     name = f.name.lower()
     try:
         if name.endswith(".csv"):
-            # Try common encodings
             raw = f.read()
             for enc in ("utf-8", "utf-8-sig", "latin-1", "cp1252"):
                 try:
@@ -469,17 +432,13 @@ def read_order_file(f) -> tuple[pd.DataFrame, str]:
         else:
             return pd.DataFrame(), f"Unsupported file type: '{f.name}'"
 
-        # Standardise column names
         df.columns = [str(c).strip() for c in df.columns]
-
-        # Check required columns
         missing = REQUIRED_ORDER_COLS - set(df.columns)
         if missing:
             return pd.DataFrame(), (
                 f"'{f.name}' is missing required columns: {', '.join(sorted(missing))}"
             )
 
-        # Add source file column for traceability
         df["_source_file"] = f.name
         return df, ""
 
@@ -488,16 +447,9 @@ def read_order_file(f) -> tuple[pd.DataFrame, str]:
 
 
 def load_all_order_files(files) -> tuple[pd.DataFrame, list[dict], list[str]]:
-    """
-    Reads all uploaded order files, concatenates them.
-    Returns:
-      - combined DataFrame
-      - list of per-file info dicts  {name, rows, status}
-      - list of error strings (empty if all ok)
-    """
-    frames      = []
-    file_info   = []
-    errors      = []
+    frames    = []
+    file_info = []
+    errors    = []
 
     for f in files:
         df, err = read_order_file(f)
@@ -508,11 +460,7 @@ def load_all_order_files(files) -> tuple[pd.DataFrame, list[dict], list[str]]:
             frames.append(df)
             file_info.append({"File": f.name, "Rows": len(df), "Status": "✅ OK"})
 
-    if frames:
-        combined = pd.concat(frames, ignore_index=True)
-    else:
-        combined = pd.DataFrame()
-
+    combined = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
     return combined, file_info, errors
 
 
@@ -523,10 +471,11 @@ def load_all_order_files(files) -> tuple[pd.DataFrame, list[dict], list[str]]:
 def run_reconciliation(order_df, charges_df, sku_cat_dict, pwn_dict,
                        cat_map, manual_cat_map,
                        fixed_fee, gst_rate,
-                       brand_charges_df=None,
+                       known_brands: list = None,
                        replace_map: dict = None,
                        pwn_overrides: dict = None,
                        sku_corrections: dict = None) -> pd.DataFrame:
+    known_brands    = known_brands    or []
     pwn_overrides   = pwn_overrides   or {}
     replace_map     = replace_map     or {}
     sku_corrections = sku_corrections or {}
@@ -544,17 +493,15 @@ def run_reconciliation(order_df, charges_df, sku_cat_dict, pwn_dict,
         ordered_on  = row.get("Ordered On", "")
         inv_amount  = float(row.get("Invoice Amount", 0) or 0)
         quantity    = int(row.get("Quantity", 1) or 1)
-        source_file = str(row.get("_source_file", "")).strip()
 
-        # ── Extract Brand from Product column ────────────────────────
-        brand_name = extract_brand_from_product(product)
-        
+        # ── Extract Brand from Product column (Order File) ────────────────
+        brand_name = extract_brand_from_product(product, known_brands)
+
         # ── Category lookup: exact → base-code fallback ──────────────────
         sub_cat_raw    = sku_cat_dict.get(sku.upper(), "")
         cat_match_note = ""
 
         if not sub_cat_raw or sub_cat_raw == "nan":
-            # Try base-code fallback in the category sheet
             fallback_sub, fallback_sku = lookup_cat_by_base(sku, sku_cat_dict)
             if fallback_sub:
                 sub_cat_raw    = fallback_sub
@@ -562,41 +509,39 @@ def run_reconciliation(order_df, charges_df, sku_cat_dict, pwn_dict,
 
         cat = get_cat_for_lookup(sub_cat_raw, cat_map, manual_cat_map)
 
-        # ── BRAND-BASED CHARGE LOOKUP (Priority) ─────────────────────
+        # ── CHARGE LOOKUP: Brand + Category first, then Category-only ────
         charge_method = ""
-        
-        # Try brand-based lookup first
-        if brand_name and brand_charges_df is not None and not brand_charges_df.empty:
-            gt_val     = get_brand_gt_amount(brand_name, inv_amount, brand_charges_df)
+        gt_val = np.nan
+
+        # Try Brand + Category lookup (Sheet 0 has both columns)
+        if brand_name and cat:
+            gt_val     = get_brand_cat_gt_amount(brand_name, cat, inv_amount, charges_df)
             commission = np.nan
             coll_fee   = np.nan
-            
+
             if pd.notna(gt_val):
                 sell_price = round(inv_amount - gt_val, 5)
-                commission = get_brand_commission(brand_name, sell_price, brand_charges_df)
-                coll_fee   = get_brand_collection_fee(brand_name, sell_price, brand_charges_df)
-                
+                commission = get_brand_cat_commission(brand_name, cat, sell_price, charges_df)
+                coll_fee   = get_brand_cat_collection_fee(brand_name, cat, sell_price, charges_df)
+
                 if pd.notna(commission) and pd.notna(coll_fee):
-                    charge_method = f"brand:{brand_name}"
+                    charge_method = f"brand+cat:{brand_name}|{cat}"
                 else:
-                    # Brand GT found but commission/collection not found - fall back
-                    gt_val = np.nan
-        else:
-            gt_val = np.nan
-        
-        # Fallback to category-based if brand lookup failed
+                    gt_val = np.nan  # partial match — fall through
+
+        # Fallback: Category-only lookup
         if pd.isna(gt_val) and cat:
             gt_val     = get_gt_amount(cat, inv_amount, charges_df)
             commission = np.nan
             coll_fee   = np.nan
-            
+
             if pd.notna(gt_val):
                 sell_price = round(inv_amount - gt_val, 5)
                 commission = get_commission(cat, sell_price, charges_df)
                 coll_fee   = get_collection_fee(cat, sell_price, charges_df)
                 charge_method = f"category:{cat}"
 
-        # Calculate final amounts
+        # ── Calculate final amounts ───────────────────────────────────────
         if pd.isna(gt_val) or (pd.isna(commission) and pd.isna(coll_fee)):
             sell_price       = np.nan
             gt_val           = np.nan
@@ -610,25 +555,22 @@ def run_reconciliation(order_df, charges_df, sku_cat_dict, pwn_dict,
         else:
             sell_price       = round(inv_amount - gt_val, 5)
             commission       = commission if pd.notna(commission) else 0.0
-            coll_fee         = coll_fee if pd.notna(coll_fee) else 0.0
+            coll_fee         = coll_fee   if pd.notna(coll_fee)   else 0.0
             total_charges    = round(commission + coll_fee + float(fixed_fee), 5)
             gst_on_charges   = round(total_charges * gst_rate, 5)
 
-            # TDS / TCS on taxable value
             taxable_value    = round(calc_taxable_value(sell_price), 5)
             tds              = calc_tds(taxable_value)
             tcs              = calc_tcs(taxable_value)
 
-            # Received Amount = Selling Price − Total Charges − GST − TDS − TCS
             total_deductions = round(total_charges + gst_on_charges + tds + tcs, 5)
             received_amount  = round(sell_price - total_charges - gst_on_charges - tds - tcs, 5)
 
-        # ── PWN lookup — with Replace map + base-code fallbacks ──────────
+        # ── PWN lookup ───────────────────────────────────────────────────
         pwn_val, match_method = lookup_pwn_with_replace(sku, pwn_dict, replace_map)
         if sku.upper() in pwn_overrides:
             pwn_val, match_method = float(pwn_overrides[sku.upper()]), "manual"
 
-        # Combine category match note into PWN match column for traceability
         full_match_note = match_method
         if cat_match_note:
             full_match_note = f"{match_method} | cat:{cat_match_note}"
@@ -641,17 +583,11 @@ def run_reconciliation(order_df, charges_df, sku_cat_dict, pwn_dict,
             pwn_benchmark = np.nan
             difference    = np.nan
 
-        # Track whether this row used a SKU correction
-        was_corrected = raw_sku.upper() in sku_corrections
-
         rows_out.append({
             "Order Id":         order_id,
             "SKU":              raw_sku,
-            "Lookup SKU":       sku,
-            "SKU Corrected":    "✅ Yes" if was_corrected else "",
             "Product":          product,
             "Brand Name":       brand_name,
-            "Source File":      source_file,
             "Ordered On":       ordered_on,
             "Sub-Category":     sub_cat_raw,
             "Charges Category": cat,
@@ -698,6 +634,7 @@ def fmt_inr(x):
     except Exception:
         return str(x)
 
+
 def style_table(df: pd.DataFrame, diff_col: str = "Difference") -> object:
     fmt_dict = {c: fmt_inr for c in df.columns if c in MONEY_COLS}
     def colour_diff(val):
@@ -721,7 +658,6 @@ def style_table(df: pd.DataFrame, diff_col: str = "Difference") -> object:
 def apply_roc_sheet_style(ws, df: pd.DataFrame):
     """Apply rich formatting + live Excel formulas to the Reconciliation sheet."""
 
-    # ── Colour palette ──────────────────────────────────────────────────────
     C_HEADER_BG = "1A3C5E"
     C_HEADER_FG = "FFFFFF"
     C_ALT1      = "EAF2FB"
@@ -741,14 +677,12 @@ def apply_roc_sheet_style(ws, df: pd.DataFrame):
     money_names = set(MONEY_COLS)
     cols        = df.columns.tolist()
 
-    # ── Build column-name → letter map ──────────────────────────────────────
     C = {name: get_column_letter(i + 1) for i, name in enumerate(cols)}
 
-    # ── Column widths ───────────────────────────────────────────────────────
     col_widths = {
-        "Order Id": 20, "SKU": 28, "Lookup SKU": 22, "SKU Corrected": 14,
-        "Product": 40, "Brand Name": 18, "Ordered On": 14, "Sub-Category": 20, 
-        "Charges Category": 18, "Charge Method": 20,
+        "Order Id": 20, "SKU": 28,
+        "Product": 40, "Brand Name": 18, "Ordered On": 14,
+        "Sub-Category": 20, "Charges Category": 18, "Charge Method": 24,
         "Qty": 6, "Invoice Amount": 15, "GT (As Per Calc)": 15,
         "Selling Price": 15, "Commission": 14, "Collection Fee": 15,
         "Fixed Fee": 10, "Total Charges": 15, "GST on Charges": 15,
@@ -759,7 +693,6 @@ def apply_roc_sheet_style(ws, df: pd.DataFrame):
     for i, col_name in enumerate(cols, start=1):
         ws.column_dimensions[get_column_letter(i)].width = col_widths.get(col_name, 14)
 
-    # ── Header row ──────────────────────────────────────────────────────────
     for cell in ws[1]:
         cell.fill      = PatternFill("solid", fgColor=C_HEADER_BG)
         cell.font      = Font(bold=True, color=C_HEADER_FG, size=10, name="Calibri")
@@ -769,7 +702,6 @@ def apply_roc_sheet_style(ws, df: pd.DataFrame):
 
     diff_col_idx = cols.index("Difference") + 1 if "Difference" in cols else None
 
-    # ── Formulas per calculated column ──────────────────────────────────────
     def row_formulas(r):
         sp   = C.get("Selling Price",    "")
         inv  = C.get("Invoice Amount",   "")
@@ -835,11 +767,10 @@ def apply_roc_sheet_style(ws, df: pd.DataFrame):
 
         return formulas
 
-    # ── Data rows ───────────────────────────────────────────────────────────
     for r_idx, row_data in enumerate(df.itertuples(index=False), start=2):
-        alt_fill  = PatternFill("solid", fgColor=C_ALT1 if r_idx % 2 == 0 else C_ALT2)
-        formulas  = row_formulas(r_idx)
-        diff_val  = getattr(row_data, "Difference", None)
+        alt_fill = PatternFill("solid", fgColor=C_ALT1 if r_idx % 2 == 0 else C_ALT2)
+        formulas = row_formulas(r_idx)
+        diff_val = getattr(row_data, "Difference", None)
 
         for c_idx, (col_name, val) in enumerate(zip(cols, row_data), start=1):
             cell = ws.cell(row=r_idx, column=c_idx)
@@ -858,15 +789,9 @@ def apply_roc_sheet_style(ws, df: pd.DataFrame):
                 cell.alignment     = Alignment(horizontal="right", vertical="center")
             elif col_name == "Qty":
                 cell.alignment = Alignment(horizontal="center", vertical="center")
-            elif col_name == "SKU Corrected":
-                cell.alignment = Alignment(horizontal="center", vertical="center")
-                if val == "✅ Yes":
-                    cell.fill = PatternFill("solid", fgColor="D6EFDD")
-                    cell.font = Font(color="1E8449", bold=True, size=9, name="Calibri")
             else:
                 cell.alignment = Alignment(horizontal="left", vertical="center")
 
-            # Conditional colour on Difference column
             if c_idx == diff_col_idx:
                 try:
                     v = float(val)
@@ -885,11 +810,9 @@ def apply_roc_sheet_style(ws, df: pd.DataFrame):
 
         ws.row_dimensions[r_idx].height = 16
 
-    # ── Freeze & filter ─────────────────────────────────────────────────────
-    ws.freeze_panes       = "A2"
-    ws.auto_filter.ref    = ws.dimensions
+    ws.freeze_panes    = "A2"
+    ws.auto_filter.ref = ws.dimensions
 
-    # ── TOTALS row ──────────────────────────────────────────────────────────
     last_data_row = len(df) + 1
     total_row     = last_data_row + 2
 
@@ -912,8 +835,7 @@ def apply_roc_sheet_style(ws, df: pd.DataFrame):
 
 
 def apply_summary_style(ws):
-    """Style the summary/charges sheet with formulas in total rows."""
-    C_H   = "2C3E50"; C_FG  = "FFFFFF"
+    C_H = "2C3E50"; C_FG = "FFFFFF"
     C_ODD = "EBF5FB"; C_EVEN = "FFFFFF"
     thin  = Side(style="thin", color="AED6F1")
     bdr   = Border(left=thin, right=thin, top=thin, bottom=thin)
@@ -934,16 +856,13 @@ def apply_summary_style(ws):
             cell.alignment = Alignment(vertical="center")
         ws.row_dimensions[r_idx].height = 15
 
-    # Auto-width
     for col_cells in ws.columns:
         width = max((len(str(c.value or "")) for c in col_cells), default=10)
         ws.column_dimensions[col_cells[0].column_letter].width = min(width + 4, 40)
 
-    # Totals row for numeric columns
     last_row  = ws.max_row
     total_row = last_row + 2
     for c_idx in range(1, ws.max_column + 1):
-        header_cell = ws.cell(row=1, column=c_idx)
         sample_cell = ws.cell(row=2, column=c_idx)
         tot_cell    = ws.cell(row=total_row, column=c_idx)
         tot_cell.fill   = PatternFill("solid", fgColor="2C3E50")
@@ -985,15 +904,14 @@ def to_excel(recon_df, summary_df, cat_df) -> bytes:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def build_summary(df: pd.DataFrame) -> tuple:
-    valid = df[df["Received Amount"].notna()]
+    valid  = df[df["Received Amount"].notna()]
     totals = {"Metric": [], "Value": []}
     fields = [
         ("Total Orders",              len(df)),
         ("Orders Calculated",         int(df["Received Amount"].notna().sum())),
         ("Orders NaN (no category)",  int(df["Received Amount"].isna().sum())),
-        ("SKU Corrections Applied",   int((df.get("SKU Corrected", pd.Series(dtype=str)) == "✅ Yes").sum())),
-        ("Brand-based Charges",       int((df.get("Charge Method", pd.Series(dtype=str)).str.startswith("brand", na=False)).sum())),
-        ("Category-based Charges",    int((df.get("Charge Method", pd.Series(dtype=str)).str.startswith("category", na=False)).sum())),
+        ("Brand+Cat Charges",         int((df.get("Charge Method", pd.Series(dtype=str)).str.startswith("brand+cat", na=False)).sum())),
+        ("Category-only Charges",     int((df.get("Charge Method", pd.Series(dtype=str)).str.startswith("category", na=False)).sum())),
         ("Total Invoice Amount",      df["Invoice Amount"].sum()),
         ("Total GT (As Per Calc)",    valid["GT (As Per Calc)"].sum()),
         ("Total Selling Price",       valid["Selling Price"].sum()),
@@ -1060,7 +978,7 @@ for k, v in [
     ("manual_cat_map", {}),
     ("result_df",      None),
     ("charges_df",     None),
-    ("brand_charges_df", None),
+    ("known_brands",   []),
     ("sku_cat_dict",   None),
     ("pwn_dict",       None),
     ("order_df",       None),
@@ -1082,7 +1000,6 @@ if order_files and charges_file:
         # ── Load & merge all order files ────────────────────────────────────
         order_df, file_info, file_errors = load_all_order_files(order_files)
 
-        # Show per-file breakdown in sidebar
         st.sidebar.markdown("---")
         st.sidebar.markdown("**📄 Uploaded Order Files**")
         fi_df = pd.DataFrame(file_info)
@@ -1098,27 +1015,29 @@ if order_files and charges_file:
             st.error("❌ No valid order rows could be loaded from the uploaded file(s). Check column names.")
             st.stop()
 
-        xl       = pd.read_excel(charges_file, sheet_name=None, header=None)
-        sheets   = list(xl.values())
+        xl     = pd.read_excel(charges_file, sheet_name=None, header=None)
+        sheets = list(xl.values())
 
         if len(sheets) < 3:
             st.error(f"❌ Excel must have at least 3 sheets. Found: {list(xl.keys())}")
             st.stop()
 
-        charges_df   = parse_charges_df(sheets[0])
-        sku_cat_dict = parse_sku_cat(sheets[1])
-        pwn_dict     = parse_pwn_dict(sheets[2])
-        
-        # Load Brand Charges sheet if exists (Sheet 3)
-        brand_charges_df = None
-        if len(sheets) >= 4:
-            try:
-                brand_charges_df = parse_brand_charges_df(sheets[3])
-                st.sidebar.success(f"✅ Brand Charges loaded: {len(brand_charges_df):,} rows")
-            except Exception as e:
-                st.sidebar.warning(f"⚠️ Brand Charges sheet found but couldn't parse: {e}")
+        # Sheet 0 — Brand Name + Category + Charge slabs
+        charges_df = parse_charges_df(sheets[0])
 
-        # Replace SKU map
+        # Extract known brands from Sheet 0 for product-name matching
+        known_brands = []
+        if "Brand Name" in charges_df.columns:
+            known_brands = charges_df["Brand Name"].dropna().unique().tolist()
+        st.sidebar.success(f"✅ Known brands from Sheet 0: {', '.join(known_brands) if known_brands else 'None'}")
+
+        # Sheet 1 — SKU → Sub-category (+ optional Brand column)
+        sku_cat_dict, _ = parse_sku_cat(sheets[1])
+
+        # Sheet 2 — PWN prices
+        pwn_dict = parse_pwn_dict(sheets[2])
+
+        # Replace SKU map (optional)
         replace_map = {}
         if replace_sku_file:
             replace_map = parse_replace_map(replace_sku_file)
@@ -1130,15 +1049,15 @@ if order_files and charges_file:
         unmapped     = [sc for sc in all_sub_cats if sc.lower() not in cat_map]
 
         st.session_state.update({
-            "charges_df":       charges_df,
-            "brand_charges_df": brand_charges_df,
-            "sku_cat_dict":     sku_cat_dict,
-            "pwn_dict":         pwn_dict,
-            "order_df":         order_df,
-            "cat_map":          cat_map,
-            "charge_cats":      charge_cats,
-            "unmapped_cats":    unmapped,
-            "replace_map":      replace_map,
+            "charges_df":   charges_df,
+            "known_brands": known_brands,
+            "sku_cat_dict": sku_cat_dict,
+            "pwn_dict":     pwn_dict,
+            "order_df":     order_df,
+            "cat_map":      cat_map,
+            "charge_cats":  charge_cats,
+            "unmapped_cats": unmapped,
+            "replace_map":  replace_map,
         })
 
     # ── Unmapped category resolver ──────────────────────────────────────────
@@ -1152,7 +1071,7 @@ if order_files and charges_file:
         ):
             st.info(
                 "These sub-categories from **Category Discription** have no matching "
-                "entry in **Charges Decription**. Pick the correct charges category for each."
+                "entry in **Charges Description**. Pick the correct charges category for each."
             )
             charge_options = ["— skip / leave as NaN —"] + sorted(st.session_state["charge_cats"])
             new_manual = {}
@@ -1181,7 +1100,7 @@ if order_files and charges_file:
         st.session_state["cat_map"],
         st.session_state["manual_cat_map"],
         fixed_fee, gst_rate,
-        brand_charges_df=st.session_state["brand_charges_df"],
+        known_brands=st.session_state["known_brands"],
         replace_map=st.session_state["replace_map"],
         pwn_overrides=st.session_state["pwn_overrides"],
         sku_corrections=st.session_state["sku_corrections"],
@@ -1189,18 +1108,15 @@ if order_files and charges_file:
     st.session_state["result_df"] = result_df
     summary_df, cat_df = build_summary(result_df)
 
-    # Count how many were resolved by replace map and brand-based
     replace_resolved = result_df[result_df["PWN Match"].str.startswith("replace", na=False)]
-    brand_charged = result_df[result_df["Charge Method"].str.startswith("brand", na=False)]
-    sku_corr_count   = int((result_df.get("SKU Corrected", pd.Series(dtype=str)) == "✅ Yes").sum())
+    brand_cat_charged = result_df[result_df["Charge Method"].str.startswith("brand+cat", na=False)]
 
     st.success(
         f"✅ Processed **{len(result_df):,}** orders  |  "
         f"**{int(result_df['Received Amount'].notna().sum()):,}** calculated  |  "
         f"**{int(result_df['Received Amount'].isna().sum()):,}** skipped (no category/GT match)"
-        + (f"  |  **{len(brand_charged):,}** charged via Brand rates" if len(brand_charged) else "")
+        + (f"  |  **{len(brand_cat_charged):,}** charged via Brand+Category rates" if len(brand_cat_charged) else "")
         + (f"  |  **{len(replace_resolved):,}** PWN found via Replace SKU map" if len(replace_resolved) else "")
-        + (f"  |  **{sku_corr_count:,}** SKU(s) corrected manually" if sku_corr_count else "")
     )
 
     # ── Live category map viewer ────────────────────────────────────────────
@@ -1251,7 +1167,6 @@ if order_files and charges_file:
                 broken_skus = broken_df["SKU"].unique().tolist()
                 correction_inputs = {}
 
-                # Table-style header row
                 h1, h2, h3, h4 = st.columns([3, 2, 2, 3])
                 h1.markdown("**Original SKU**")
                 h2.markdown("**Issue**")
@@ -1290,7 +1205,6 @@ if order_files and charges_file:
                     )
                     correction_inputs[sku] = corrected.strip()
 
-                    # Live preview: show what the saved correction resolves to
                     if existing_correction:
                         lookup_sku = strip_vendor_prefix(existing_correction)
                         sub_cat_preview = st.session_state["sku_cat_dict"].get(lookup_sku.upper(), "")
@@ -1344,7 +1258,6 @@ if order_files and charges_file:
                     st.session_state["sku_corrections"] = {}
                     st.rerun()
 
-        # ── Show existing corrections summary if any ────────────────────────
         if st.session_state["sku_corrections"]:
             with st.expander(
                 f"✅  **{len(st.session_state['sku_corrections'])} SKU correction(s) active** — click to view/manage",
@@ -1381,28 +1294,24 @@ if order_files and charges_file:
 
         st.markdown("---")
 
-        f1, f2, f3, f4, f5 = st.columns([2, 2, 2, 2, 3])
+        # ── Filters ─────────────────────────────────────────────────────────
+        f1, f2, f3, f4 = st.columns([2, 2, 2, 3])
         all_cats_opt = ["All"] + sorted(result_df["Sub-Category"].dropna().unique().tolist())
-        sel_cat  = f1.selectbox("Sub-Category", all_cats_opt)
-        
+        sel_cat   = f1.selectbox("Sub-Category", all_cats_opt)
+
         all_brands = ["All"] + sorted(result_df["Brand Name"].dropna().unique().tolist())
-        sel_brand = f2.selectbox("Brand", all_brands)
-        
+        sel_brand  = f2.selectbox("Brand", all_brands)
+
         diff_opt = f3.selectbox("Difference type",
                                 ["All", "Positive (+)", "Negative (−)",
-                                 "Zero / Matched", "No PWN data", "No Category (NaN)",
-                                 "SKU Corrected ✅"])
-        all_sources = ["All"] + sorted(result_df["Source File"].dropna().unique().tolist())
-        sel_source = f4.selectbox("Source File", all_sources)
-        search   = f5.text_input("🔎 Search by SKU or Order ID")
+                                 "Zero / Matched", "No PWN data", "No Category (NaN)"])
+        search = f4.text_input("🔎 Search by SKU or Order ID")
 
         view = result_df.copy()
         if sel_cat != "All":
             view = view[view["Sub-Category"] == sel_cat]
         if sel_brand != "All":
             view = view[view["Brand Name"] == sel_brand]
-        if sel_source != "All":
-            view = view[view["Source File"] == sel_source]
         if diff_opt == "Positive (+)":
             view = view[view["Difference"] > 0]
         elif diff_opt == "Negative (−)":
@@ -1413,8 +1322,6 @@ if order_files and charges_file:
             view = view[view["PWN Match"] == "not_found"]
         elif diff_opt == "No Category (NaN)":
             view = view[view["Received Amount"].isna()]
-        elif diff_opt == "SKU Corrected ✅":
-            view = view[view.get("SKU Corrected", pd.Series(dtype=str)) == "✅ Yes"]
         if search.strip():
             mask = (
                 view["SKU"].str.contains(search.strip(), case=False, na=False) |
@@ -1424,8 +1331,9 @@ if order_files and charges_file:
 
         st.caption(f"Showing **{len(view):,}** of **{len(result_df):,}** orders")
 
+        # ── Display columns (no Lookup SKU / SKU Corrected / Source File) ──
         display_cols = [
-            "Order Id", "SKU", "Lookup SKU", "SKU Corrected", "Brand Name", "Source File", "Ordered On",
+            "Order Id", "SKU", "Product", "Brand Name", "Ordered On",
             "Sub-Category", "Charges Category", "Charge Method",
             "Qty", "Invoice Amount",
             "GT (As Per Calc)", "Selling Price",
@@ -1495,7 +1403,7 @@ if order_files and charges_file:
             b2.metric("Orders –ve Diff", int((valid["Difference"] < 0).sum()))
 
         st.info(
-            "ℹ️  **Charge Method:** brand:BrandName (brand-based) or category:CategoryName (fallback)  \n"
+            "ℹ️  **Charge Method:** brand+cat:Brand|Category (brand+category lookup) or category:CategoryName (fallback)  \n"
             "**Received Amount** = Selling Price − Total Charges − GST on Charges − TDS − TCS  \n"
             "**Taxable Value** = Selling Price − (Selling Price / 105 × 5)  \n"
             "**TDS** = Taxable Value × 0.1%  |  **TCS** = Taxable Value × 0.5%  \n"
@@ -1557,53 +1465,52 @@ else:
 | File | Description |
 |------|-------------|
 | **Order File(s)** | Flipkart Seller Hub export — CSV, XLSX or XLS. Upload **one or more** files and they are merged automatically. Needs columns: `Order Id`, `SKU`, `Product`, `Ordered On`, `Invoice Amount`, `Quantity` |
-| **Data Excel** | Yash Gallery workbook — 3-4 sheets by position (see below) |
+| **Data Excel** | Yash Gallery workbook — 3 sheets by position (see below) |
 | **Replace SKU Excel** *(optional)* | Maps Seller SKU Id → OMS SKU for PWN fallback lookup |
 
 **Excel sheet positions:**
 
 | Position | Sheet Name | Used For |
 |----------|-----------|----------|
-| Index 0 | Charges Decription | Commission / Collection / GT slabs (category-based fallback) |
+| Index 0 | Data For Flipkart Roc | Brand Name + Category → Commission / Collection / GT slabs |
 | Index 1 | Category Discription | Seller SKU → Sub-category |
 | Index 2 | Price We Need | OMS Child SKU → PWN price |
-| Index 3 | **Brand Charges** ✨ NEW | Brand Name → Commission / Collection / GT slabs |
 
 ---
-### ✨ Brand-Based Charging (NEW!)
+### ✨ Brand + Category Charge Lookup
 
 **How it works:**
 
-1. **Brand extracted from Product column**
+1. **Brand extracted from Product column** in the Order File  
    - Example: `"Yash Gallery Women Floral Print..."` → Brand = `"Yash Gallery"`
    - Example: `"KALINI Women Fit and Flare..."` → Brand = `"KALINI"`
+   - Matches against known brands loaded from Sheet 0 (longest match first)
 
-2. **Brand rates take priority**
-   - System looks up rates by Brand Name first
-   - Falls back to category-based rates if brand not found
+2. **Charge lookup uses Brand + Category together**  
+   - Looks up in Sheet 0 using both Brand Name AND Category  
+   - Falls back to Category-only if brand not found in Sheet 0
 
-3. **Sheet 3 format (Brand Charges):**
+3. **Sheet 0 format (Data For Flipkart Roc):**
 
-| Brand Name | Lower Limit Commission | Upper Limit Commission | Commission % | Collection Lower | Collection Upper | Collection % | GT Lower | GT Upper | GT Charge |
-|------------|----------------------|----------------------|--------------|-----------------|-----------------|--------------|----------|----------|-----------|
-| Yash Gallery | 0 | 500 | 0.15 | 0 | 500 | 0.02 | 0 | 200 | 52 |
-| Yash Gallery | 501 | 1000 | 0.15 | 501 | 1000 | 0.02 | 201 | 300 | 68 |
-| KALINI | 0 | 500 | 0.18 | 0 | 500 | 0.025 | 0 | 200 | 55 |
-| KALINI | 501 | 1000 | 0.18 | 501 | 1000 | 0.025 | 201 | 300 | 70 |
+| Brand Name | Category | Lower Limit Commission | Upper Limit Commission | Commission % | Collection Lower | Collection Upper | Collection % | GT Lower | GT Upper | GT Charge |
+|------------|----------|----------------------|----------------------|--------------|-----------------|-----------------|--------------|----------|----------|-----------|
+| Yash Gallery | kurta | 0 | 500 | 0.09 | 0 | 500 | 0.003 | 0 | 200 | 52 |
+| Yash Gallery | gown | 0 | 500 | 0.09 | 0 | 500 | 0.003 | 0 | 200 | 52 |
+| KALINI | kurta | 0 | 500 | 0.12 | 0 | 500 | 0.003 | 0 | 200 | 52 |
 
 ---
 ### Calculation per order
 
 ```
 BRAND LOOKUP:
-Brand Name       = Extract from Product column (first words)
-Charge Method    = "brand:BrandName" if found, else "category:CategoryName"
+Brand Name       = Extracted from Product column (matched against Sheet 0 brands)
+Charge Method    = "brand+cat:BrandName|Category" if found, else "category:CategoryName"
 
-GT Amount        = Fixed ₹ from GT slab (Invoice Amount → brand/category slab)
+GT Amount        = Fixed ₹ from GT slab (Invoice Amount → Brand+Category slab)
 Selling Price    = Invoice Amount − GT Amount
 
-Commission       = Selling Price × Commission % (from brand/category slab)
-Collection Fee   = Selling Price × Collection % (from brand/category slab)
+Commission       = Selling Price × Commission % (from Brand+Category slab)
+Collection Fee   = Selling Price × Collection % (from Brand+Category slab)
 Total Charges    = Commission + Collection Fee + Fixed Fee
 
 GST              = Total Charges × 18%
