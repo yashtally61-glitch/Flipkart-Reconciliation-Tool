@@ -44,6 +44,9 @@ with st.sidebar:
 - *"Yash Gallery Women Kurta\u2026"* \u2192 **Yash Gallery**
 - *"KALINI Shirt Pant\u2026"* \u2192 **KALINI**
 - *"Tasrika Women Kurta\u2026"* \u2192 **Tasrika**
+- *"AKIKO\u2026"* \u2192 **Pushpa**
+- *"HouseOfCommon\u2026"* \u2192 **Pushpa**
+- *"IKRASS\u2026"* \u2192 **IKRASS**
 
 **Excel sheet positions:**
 - Sheet 0 \u2014 Charges Rates (Brand+Category \u2192 slabs)
@@ -52,10 +55,30 @@ with st.sidebar:
 
 **TDS/TCS:** TDS=0.1% | TCS=0.5%  
 Taxable Value = SP \u2212 (SP/105\u00d75)
+
+**SKU for PWN:** Replace SKU map applied only for PWN lookup.  
+All other lookups (category, GT, charges) use the original SKU.
 """)
 
-# ─── KNOWN BRANDS ─────────────────────────────────────────────────────────────
-KNOWN_BRANDS = ["Yash Gallery", "KALINI", "Tasrika"]
+# ─── KNOWN BRANDS & DISPLAY MAP ───────────────────────────────────────────────
+# Order matters: longer/more-specific brand names should come first to avoid
+# partial matches (e.g. "HouseOfCommon" before a hypothetical "House").
+KNOWN_BRANDS = [
+    "Yash Gallery",
+    "HouseOfCommon",   # must be before any shorter alternative
+    "KALINI",
+    "Tasrika",
+    "AKIKO",
+    "IKRASS",
+]
+
+# Maps the raw product-name prefix to the display brand name used in Sheet 0
+BRAND_DISPLAY_MAP = {
+    "AKIKO":         "Pushpa",
+    "HouseOfCommon": "Pushpa",
+    "IKRASS":        "IKRASS",
+    # All others map to themselves (handled by fallback in function below)
+}
 
 def extract_brand_from_product(product: str) -> str:
     """
@@ -63,13 +86,16 @@ def extract_brand_from_product(product: str) -> str:
     'Yash Gallery Women Kurta...' -> 'Yash Gallery'
     'KALINI Shirt Pant...'        -> 'KALINI'
     'Tasrika Women Kurta...'      -> 'Tasrika'
+    'AKIKO ...'                   -> 'Pushpa'
+    'HouseOfCommon ...'           -> 'Pushpa'
+    'IKRASS ...'                  -> 'IKRASS'
     """
     if not product or str(product).strip().lower() == "nan":
         return ""
     p = str(product).strip()
     for brand in KNOWN_BRANDS:
         if p.lower().startswith(brand.lower()):
-            return brand
+            return BRAND_DISPLAY_MAP.get(brand, brand)
     return ""
 
 # ─── SIZE EXPAND ──────────────────────────────────────────────────────────────
@@ -296,10 +322,11 @@ def run_reconciliation(order_df, charges_df, sku_info_dict, pwn_dict,
         inv_amount = float(row.get("Invoice Amount",0) or 0)
         quantity   = int(row.get("Quantity",1) or 1)
 
-        # Step 1: Manual SKU correction
+        # Step 1: Manual SKU correction (only affects downstream lookups, not raw_sku display)
         corrected_raw = sku_corrections.get(raw_sku.upper(), raw_sku)
 
-        # Step 2: Replace SKU mapping
+        # Step 2: Replace SKU mapping (applied to corrected SKU for ALL lookups except PWN)
+        #         For PWN we keep a separate internal SKU — see Step 5b.
         if corrected_raw.strip().upper() in replace_map:
             corrected_raw = replace_map[corrected_raw.strip().upper()]
 
@@ -307,14 +334,39 @@ def run_reconciliation(order_df, charges_df, sku_info_dict, pwn_dict,
         # "Yash Gallery Women Kurta..." -> "Yash Gallery"
         # "KALINI Shirt Pant..."        -> "KALINI"
         # "Tasrika Women Kurta..."      -> "Tasrika"
+        # "AKIKO ..."                   -> "Pushpa"
+        # "HouseOfCommon ..."           -> "Pushpa"
+        # "IKRASS ..."                  -> "IKRASS"
         brand_name = extract_brand_from_product(product)
 
-        # Step 4: Sub-category from Sheet 1 (SKU lookup only)
+        # Step 4: Sub-category from Sheet 1 (SKU lookup only — brand NOT used here)
         sub_cat, cat_match_note = lookup_sub_cat(corrected_raw, sku_info_dict)
         cat = sub_cat.strip() if sub_cat and str(sub_cat).lower() != "nan" else ""
 
-        # Step 5: Stripped SKU for PWN lookup (PWN dict has no prefixes)
+        # Step 5: Stripped SKU for standard use
         sku_for_pwn = strip_vendor_prefix(corrected_raw)
+
+        # ── Step 5b: Build a SEPARATE internal SKU used ONLY for PWN lookup ──
+        # This applies the Replace SKU map independently so it never disturbs
+        # category / GT / Commission / Collection lookups above.
+        # Priority: stripped original -> replace_map on stripped -> replace_map on raw corrected
+        sku_for_pwn_replace = sku_for_pwn   # start with stripped version
+
+        # Try replace map on the stripped key first
+        _stripped_upper = sku_for_pwn.strip().upper()
+        if _stripped_upper in replace_map:
+            sku_for_pwn_replace = replace_map[_stripped_upper]
+        else:
+            # Try replace map on the raw corrected key
+            _corrected_upper = corrected_raw.strip().upper()
+            if _corrected_upper in replace_map:
+                sku_for_pwn_replace = replace_map[_corrected_upper]
+            else:
+                # Try replace map on the original raw SKU (before any correction)
+                _raw_upper = raw_sku.strip().upper()
+                if _raw_upper in replace_map:
+                    sku_for_pwn_replace = replace_map[_raw_upper]
+        # ─────────────────────────────────────────────────────────────────────
 
         # Step 6: Slab lookups using Brand (from product) + Sub-category (from Sheet 1)
         gt_val=sell_price=commission=coll_fee=np.nan
@@ -353,9 +405,20 @@ def run_reconciliation(order_df, charges_df, sku_info_dict, pwn_dict,
             total_deductions = round(total_charges + gst_on_charges + tds + tcs, 5)
             received_amount  = round(sell_price - total_charges - gst_on_charges - tds - tcs, 5)
 
-        # Step 8: PWN lookup (use stripped SKU)
-        pwn_val, match_method = lookup_pwn_with_replace(sku_for_pwn, pwn_dict, replace_map)
-        if sku_for_pwn.upper() in pwn_overrides:
+        # Step 8: PWN lookup — uses the SEPARATE replace-applied SKU (sku_for_pwn_replace)
+        # This is completely independent of the charge lookups above.
+        pwn_val, match_method = lookup_pwn(sku_for_pwn_replace, pwn_dict)
+        if match_method == "not_found" and sku_for_pwn_replace != sku_for_pwn:
+            # Fallback: try without replace map
+            pwn_val, match_method = lookup_pwn(sku_for_pwn, pwn_dict)
+        if match_method == "not_found":
+            # Final fallback via replace map traversal (handles size-expand after replace)
+            pwn_val, match_method = lookup_pwn_with_replace(sku_for_pwn, pwn_dict, replace_map)
+
+        # Manual PWN override (highest priority)
+        if sku_for_pwn_replace.upper() in pwn_overrides:
+            pwn_val, match_method = float(pwn_overrides[sku_for_pwn_replace.upper()]), "manual"
+        elif sku_for_pwn.upper() in pwn_overrides:
             pwn_val, match_method = float(pwn_overrides[sku_for_pwn.upper()]), "manual"
 
         full_match_note = match_method
@@ -370,24 +433,35 @@ def run_reconciliation(order_df, charges_df, sku_info_dict, pwn_dict,
             pwn_benchmark = difference = np.nan
 
         rows_out.append({
-            "Order Id":raw_sku and order_id,
-            "SKU":raw_sku, "Product":product, "Brand Name":brand_name,
-            "Ordered On":ordered_on, "Sub-Category":sub_cat,
-            "Charge Method":charge_method, "Qty":quantity,
-            "Invoice Amount":inv_amount, "GT (As Per Calc)":gt_val,
-            "Selling Price":sell_price, "Commission":commission,
-            "Collection Fee":coll_fee, "Fixed Fee":float(fixed_fee),
-            "Total Charges":total_charges, "GST on Charges":gst_on_charges,
-            "Taxable Value":taxable_value, "TDS":tds, "TCS":tcs,
-            "Total Deductions":total_deductions, "Received Amount":received_amount,
-            "PWN":pwn_val, "PWN Benchmark":pwn_benchmark,
-            "PWN Match":full_match_note, "Difference":difference,
+            "Order Id":order_id,
+            "SKU":raw_sku,
+            "SKU for PWN":sku_for_pwn_replace,   # ← internal column: replace-mapped SKU used for PWN lookup only
+            "Product":product,
+            "Brand Name":brand_name,
+            "Ordered On":ordered_on,
+            "Sub-Category":sub_cat,
+            "Charge Method":charge_method,
+            "Qty":quantity,
+            "Invoice Amount":inv_amount,
+            "GT (As Per Calc)":gt_val,
+            "Selling Price":sell_price,
+            "Commission":commission,
+            "Collection Fee":coll_fee,
+            "Fixed Fee":float(fixed_fee),
+            "Total Charges":total_charges,
+            "GST on Charges":gst_on_charges,
+            "Taxable Value":taxable_value,
+            "TDS":tds,
+            "TCS":tcs,
+            "Total Deductions":total_deductions,
+            "Received Amount":received_amount,
+            "PWN":pwn_val,
+            "PWN Benchmark":pwn_benchmark,
+            "PWN Match":full_match_note,
+            "Difference":difference,
         })
 
-    df_out = pd.DataFrame(rows_out)
-    # Fix Order Id (was accidentally using short-circuit)
-    df_out["Order Id"] = order_df["Order Id"].astype(str).values
-    return df_out
+    return pd.DataFrame(rows_out)
 
 # ─── FORMATTING ───────────────────────────────────────────────────────────────
 MONEY_COLS = ["Invoice Amount","GT (As Per Calc)","Selling Price","Commission",
@@ -429,12 +503,13 @@ def apply_roc_sheet_style(ws, df):
     cols = df.columns.tolist()
     C = {name: get_column_letter(i+1) for i,name in enumerate(cols)}
     col_widths = {
-        "Order Id":20,"SKU":28,"Product":40,"Brand Name":18,"Ordered On":14,
-        "Sub-Category":20,"Charge Method":28,"Qty":6,"Invoice Amount":15,
-        "GT (As Per Calc)":15,"Selling Price":15,"Commission":14,"Collection Fee":15,
-        "Fixed Fee":10,"Total Charges":15,"GST on Charges":15,"Taxable Value":14,
-        "TDS":10,"TCS":10,"Total Deductions":16,"Received Amount":16,
-        "PWN":12,"PWN Benchmark":15,"PWN Match":16,"Difference":14,
+        "Order Id":20,"SKU":28,"SKU for PWN":28,"Product":40,"Brand Name":18,
+        "Ordered On":14,"Sub-Category":20,"Charge Method":28,"Qty":6,
+        "Invoice Amount":15,"GT (As Per Calc)":15,"Selling Price":15,
+        "Commission":14,"Collection Fee":15,"Fixed Fee":10,"Total Charges":15,
+        "GST on Charges":15,"Taxable Value":14,"TDS":10,"TCS":10,
+        "Total Deductions":16,"Received Amount":16,"PWN":12,
+        "PWN Benchmark":15,"PWN Match":16,"Difference":14,
     }
     for i,cn in enumerate(cols,start=1):
         ws.column_dimensions[get_column_letter(i)].width = col_widths.get(cn,14)
@@ -770,10 +845,11 @@ if order_files and charges_file:
             view=view[mask]
 
         st.caption(f"Showing **{len(view):,}** of **{len(result_df):,}** orders")
-        display_cols=["Order Id","SKU","Product","Brand Name","Ordered On","Sub-Category","Charge Method",
-                      "Qty","Invoice Amount","GT (As Per Calc)","Selling Price","Commission","Collection Fee",
-                      "Fixed Fee","Total Charges","GST on Charges","Taxable Value","TDS","TCS",
-                      "Total Deductions","Received Amount","PWN","PWN Benchmark","Difference","PWN Match"]
+        display_cols=["Order Id","SKU","SKU for PWN","Product","Brand Name","Ordered On","Sub-Category",
+                      "Charge Method","Qty","Invoice Amount","GT (As Per Calc)","Selling Price",
+                      "Commission","Collection Fee","Fixed Fee","Total Charges","GST on Charges",
+                      "Taxable Value","TDS","TCS","Total Deductions","Received Amount",
+                      "PWN","PWN Benchmark","Difference","PWN Match"]
         st.dataframe(style_table(view[display_cols],diff_col="Difference"),use_container_width=True,height=500)
 
         st.markdown("### \U0001f4e5 Download")
@@ -814,17 +890,18 @@ if order_files and charges_file:
                       delta_color="normal" if net>=0 else "inverse")
             b2.metric("Orders \u2212ve Diff",int((valid["Difference"]<0).sum()))
         st.info(
-            "\u2139\ufe0f  **Brand** \u2192 from Product name (Yash Gallery / KALINI / Tasrika)  \n"
+            "\u2139\ufe0f  **Brand** \u2192 from Product name (Yash Gallery / KALINI / Tasrika / Pushpa / IKRASS)  \n"
             "**Sub-Category** \u2192 from Sheet 1 via SKU lookup  \n"
             "**GT** \u2192 slab on Invoice Amount (fixed \u20b9)  \n"
             "**Commission & Collection** \u2192 independent slabs on Selling Price  \n"
             "**Received Amount** = Selling Price \u2212 Total Charges \u2212 GST \u2212 TDS \u2212 TCS  \n"
             "**Taxable Value** = Selling Price \u2212 (Selling Price / 105 \u00d7 5)  \n"
-            "**Difference** = Received Amount \u2212 (Qty \u00d7 PWN)"
+            "**Difference** = Received Amount \u2212 (Qty \u00d7 PWN)  \n"
+            "**SKU for PWN** \u2192 Replace SKU map applied independently, only for PWN lookup"
         )
         st.markdown("---")
         st.markdown("#### \U0001f4cb Per-Order Charges Detail")
-        charge_cols=["Order Id","SKU","Brand Name","Sub-Category","Charge Method",
+        charge_cols=["Order Id","SKU","SKU for PWN","Brand Name","Sub-Category","Charge Method",
                      "Invoice Amount","GT (As Per Calc)","Selling Price","Commission","Collection Fee",
                      "Fixed Fee","Total Charges","GST on Charges","Taxable Value","TDS","TCS",
                      "Total Deductions","Received Amount"]
@@ -859,18 +936,26 @@ else:
 | **Replace SKU Excel** *(optional)* | Seller SKU \u2192 OMS SKU mapping |
 
 ---
-### \u2705 Brand Detection (Fixed)
+### \u2705 Brand Detection
 
 Brand is read from the **Product name** in the order file \u2014 not from the SKU prefix:
 
-| Product starts with | Brand |
-|---------------------|-------|
+| Product starts with | Brand used |
+|---------------------|------------|
 | `Yash Gallery` | Yash Gallery |
 | `KALINI` | KALINI |
 | `Tasrika` | Tasrika |
+| `AKIKO` | Pushpa |
+| `HouseOfCommon` | Pushpa |
+| `IKRASS` | IKRASS |
 
-This fixes the previous bug where stripping `KL_` from a SKU caused KALINI products
-to be incorrectly matched as Yash Gallery in Sheet 1.
+---
+### \u2705 SKU for PWN (new column)
+
+The **Replace SKU Excel** is applied **independently** to generate a separate
+`SKU for PWN` column used **only** for PWN price lookup.  
+All other lookups (Sub-category, GT, Commission, Collection) continue using
+the original SKU — completely unaffected.
 
 ---
 ### \u2705 Calculation Logic
