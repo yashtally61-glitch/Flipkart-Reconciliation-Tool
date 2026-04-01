@@ -11,8 +11,8 @@ import warnings
 warnings.filterwarnings("ignore")
 
 st.set_page_config(
-    page_title="Flipkart Reconciliation \u2013 Yash Gallery Private Limited",
-    layout="wide", page_icon="\U0001f9fe",
+    page_title="Flipkart Reconciliation – Multi-Account",
+    layout="wide", page_icon="🧾",
 )
 st.markdown("""
 <style>
@@ -21,53 +21,41 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("\U0001f9fe Flipkart Reconciliation Tool")
-st.caption("Yash Gallery Private Limited \u2014 Tool made by Ashu Bhatt | Finance Team")
+st.title("🧾 Flipkart Reconciliation Tool — Multi-Account")
+st.caption("Yash Gallery Private Limited — Tool made by Ashu Bhatt | Finance Team")
 
-# ─── SIDEBAR ──────────────────────────────────────────────────────────────────
-with st.sidebar:
-    st.header("\U0001f4c2 Upload Files")
-    order_files  = st.file_uploader("1\ufe0f\u20e3  Order File(s)  (CSV / XLSX / XLS \u2014 multiple allowed)",
-                                     type=["csv","xlsx","xls"], accept_multiple_files=True)
-    charges_file = st.file_uploader("2\ufe0f\u20e3  Data Excel", type=["xlsx"])
-    replace_sku_file = st.file_uploader("3\ufe0f\u20e3  Replace SKU Excel (optional)", type=["xlsx"])
-    st.markdown("---")
-    st.subheader("\u2699\ufe0f Settings")
-    fixed_fee = st.number_input("Fixed Fee per order (\u20b9)", value=5,  min_value=0, step=1)
-    gst_rate  = st.number_input("GST on charges (%)",      value=18, min_value=0, step=1) / 100
-    TDS_RATE = 0.001
-    TCS_RATE = 0.005
-    st.markdown("---")
-    st.markdown("""
-**How Brand is determined:**
-- Read from **Product name** in the Order file
-- *"Yash Gallery Women Kurta\u2026"* \u2192 **Yash Gallery**
-- *"KALINI Shirt Pant\u2026"* \u2192 **KALINI**
-- *"Tasrika Women Kurta\u2026"* \u2192 **Tasrika**
+# ─── ACCOUNT CONFIG ───────────────────────────────────────────────────────────
+ACCOUNTS = {
+    "Yash Gallery": {
+        "brands": ["Yash Gallery", "KALINI", "Tasrika"],
+        "color": "#1A3C5E",
+    },
+    "Pushpa Enterprises": {
+        "brands": ["AKIKO", "Pushpa", "HouseOfCommon"],
+        "color": "#1E6B3A",
+    },
+    "Aashirwad Garments": {
+        "brands": ["IKRASS"],
+        "color": "#7B2D00",
+    },
+}
+ACCOUNT_NAMES = list(ACCOUNTS.keys())
 
-**Excel sheet positions:**
-- Sheet 0 \u2014 Charges Rates (Brand+Category \u2192 slabs)
-- Sheet 1 \u2014 Category Description (SKU \u2192 Sub-category)
-- Sheet 2 \u2014 Price We Need (PWN prices)
+def get_account_for_brand(brand: str) -> str:
+    for acc, cfg in ACCOUNTS.items():
+        for b in cfg["brands"]:
+            if brand.lower() == b.lower():
+                return acc
+    return "Unmatched"
 
-**TDS/TCS:** TDS=0.1% | TCS=0.5%  
-Taxable Value = SP \u2212 (SP/105\u00d75)
-""")
-
-# ─── KNOWN BRANDS ─────────────────────────────────────────────────────────────
-KNOWN_BRANDS = ["Yash Gallery", "KALINI", "Tasrika"]
+# ─── KNOWN BRANDS (all) ───────────────────────────────────────────────────────
+ALL_KNOWN_BRANDS = [b for cfg in ACCOUNTS.values() for b in cfg["brands"]]
 
 def extract_brand_from_product(product: str) -> str:
-    """
-    Extract brand from the Product column in the order file.
-    'Yash Gallery Women Kurta...' -> 'Yash Gallery'
-    'KALINI Shirt Pant...'        -> 'KALINI'
-    'Tasrika Women Kurta...'      -> 'Tasrika'
-    """
     if not product or str(product).strip().lower() == "nan":
         return ""
     p = str(product).strip()
-    for brand in KNOWN_BRANDS:
+    for brand in ALL_KNOWN_BRANDS:
         if p.lower().startswith(brand.lower()):
             return brand
     return ""
@@ -105,33 +93,24 @@ def get_sku_base(sku: str) -> str:
     return parts[0] if len(parts)==2 else key
 
 def lookup_sub_cat(raw_sku: str, sku_info_dict: dict) -> tuple:
-    """
-    Return (sub_category, match_note) from Sheet 1.
-    Priority: exact original -> exact stripped -> base original -> base stripped.
-    NOTE: Brand is NOT taken from Sheet 1. It comes from the Product name.
-    """
     key_raw = raw_sku.strip().upper()
     info = sku_info_dict.get(key_raw)
     if info and info.get("sub_cat") and str(info["sub_cat"]).lower() != "nan":
         return info["sub_cat"], "exact"
-
     stripped = strip_vendor_prefix(raw_sku).strip().upper()
     if stripped != key_raw:
         info2 = sku_info_dict.get(stripped)
         if info2 and info2.get("sub_cat") and str(info2["sub_cat"]).lower() != "nan":
             return info2["sub_cat"], "exact-stripped"
-
     base_raw = get_sku_base(key_raw)
     for csk, ci in sku_info_dict.items():
         if get_sku_base(csk)==base_raw and ci.get("sub_cat") and str(ci["sub_cat"]).lower()!="nan":
             return ci["sub_cat"], f"base({csk})"
-
     if stripped != key_raw:
         base_str = get_sku_base(stripped)
         for csk, ci in sku_info_dict.items():
             if get_sku_base(csk)==base_str and ci.get("sub_cat") and str(ci["sub_cat"]).lower()!="nan":
                 return ci["sub_cat"], f"base-stripped({csk})"
-
     return "", "not_found"
 
 def lookup_pwn(sku: str, pwn_dict: dict) -> tuple:
@@ -156,7 +135,7 @@ def lookup_pwn_with_replace(sku, pwn_dict, replace_map):
     oms = replace_map.get(sku.strip().upper())
     if oms:
         v2,m2 = lookup_pwn(oms, pwn_dict)
-        if m2!="not_found": return v2,f"replace\u2192{m2}"
+        if m2!="not_found": return v2,f"replace→{m2}"
     return np.nan,"not_found"
 
 # ─── SLAB LOOKUPS ─────────────────────────────────────────────────────────────
@@ -213,12 +192,11 @@ def parse_charges_df(raw):
         if col in df.columns: df[col] = pd.to_numeric(df[col],errors="coerce")
     if "Collection Charge" in df.columns:
         df["Collection Charge"] = (df["Collection Charge"].astype(str)
-            .str.replace("\u20b9","",regex=False).str.strip()
+            .str.replace("₹","",regex=False).str.strip()
             .pipe(pd.to_numeric,errors="coerce"))
     return df
 
 def parse_sku_info(raw):
-    """Sheet 1 -> UPPER_SKU -> {sub_cat, brand}. Used ONLY for Sub-category lookup."""
     df = raw.copy()
     df.columns = [str(c).strip() for c in raw.iloc[0].tolist()]
     df = df.iloc[1:].reset_index(drop=True)
@@ -274,15 +252,18 @@ def load_all_order_files(files):
     frames,file_info,errors = [],[],[]
     for f in files:
         df,err = read_order_file(f)
-        if err: errors.append(err); file_info.append({"File":f.name,"Rows":0,"Status":"\u274c Error"})
-        else:   frames.append(df); file_info.append({"File":f.name,"Rows":len(df),"Status":"\u2705 OK"})
+        if err: errors.append(err); file_info.append({"File":f.name,"Rows":0,"Status":"❌ Error"})
+        else:   frames.append(df); file_info.append({"File":f.name,"Rows":len(df),"Status":"✅ OK"})
     combined = pd.concat(frames,ignore_index=True) if frames else pd.DataFrame()
     return combined, file_info, errors
 
 # ─── CORE RECONCILIATION ──────────────────────────────────────────────────────
+TDS_RATE = 0.001
+TCS_RATE = 0.005
+
 def run_reconciliation(order_df, charges_df, sku_info_dict, pwn_dict,
-                       fixed_fee, gst_rate,
-                       replace_map=None, pwn_overrides=None, sku_corrections=None):
+                       fixed_fee, gst_rate, replace_map=None,
+                       pwn_overrides=None, sku_corrections=None):
     replace_map     = replace_map     or {}
     pwn_overrides   = pwn_overrides   or {}
     sku_corrections = sku_corrections or {}
@@ -296,27 +277,15 @@ def run_reconciliation(order_df, charges_df, sku_info_dict, pwn_dict,
         inv_amount = float(row.get("Invoice Amount",0) or 0)
         quantity   = int(row.get("Quantity",1) or 1)
 
-        # Step 1: Manual SKU correction
         corrected_raw = sku_corrections.get(raw_sku.upper(), raw_sku)
-
-        # Step 2: Replace SKU mapping
         if corrected_raw.strip().upper() in replace_map:
             corrected_raw = replace_map[corrected_raw.strip().upper()]
 
-        # Step 3: Brand from Product name (NOT from Sheet 1)
-        # "Yash Gallery Women Kurta..." -> "Yash Gallery"
-        # "KALINI Shirt Pant..."        -> "KALINI"
-        # "Tasrika Women Kurta..."      -> "Tasrika"
         brand_name = extract_brand_from_product(product)
-
-        # Step 4: Sub-category from Sheet 1 (SKU lookup only)
         sub_cat, cat_match_note = lookup_sub_cat(corrected_raw, sku_info_dict)
         cat = sub_cat.strip() if sub_cat and str(sub_cat).lower() != "nan" else ""
-
-        # Step 5: Stripped SKU for PWN lookup (PWN dict has no prefixes)
         sku_for_pwn = strip_vendor_prefix(corrected_raw)
 
-        # Step 6: Slab lookups using Brand (from product) + Sub-category (from Sheet 1)
         gt_val=sell_price=commission=coll_fee=np.nan
         charge_method = "not_found"
 
@@ -331,7 +300,6 @@ def run_reconciliation(order_df, charges_df, sku_info_dict, pwn_dict,
                 else:
                     gt_val=sell_price=commission=coll_fee=np.nan
 
-        # Step 7: Final amounts
         if pd.isna(gt_val):
             sell_price=gt_val=commission=coll_fee=np.nan
             total_charges=gst_on_charges=taxable_value=np.nan
@@ -353,7 +321,6 @@ def run_reconciliation(order_df, charges_df, sku_info_dict, pwn_dict,
             total_deductions = round(total_charges + gst_on_charges + tds + tcs, 5)
             received_amount  = round(sell_price - total_charges - gst_on_charges - tds - tcs, 5)
 
-        # Step 8: PWN lookup (use stripped SKU)
         pwn_val, match_method = lookup_pwn_with_replace(sku_for_pwn, pwn_dict, replace_map)
         if sku_for_pwn.upper() in pwn_overrides:
             pwn_val, match_method = float(pwn_overrides[sku_for_pwn.upper()]), "manual"
@@ -362,7 +329,6 @@ def run_reconciliation(order_df, charges_df, sku_info_dict, pwn_dict,
         if cat_match_note and cat_match_note not in ("exact","exact-stripped"):
             full_match_note = f"{match_method} | cat:{cat_match_note}"
 
-        # Step 9: Difference
         if pd.notna(received_amount) and pd.notna(pwn_val):
             pwn_benchmark = round(pwn_val * quantity, 5)
             difference    = round(received_amount - pwn_benchmark, 5)
@@ -370,7 +336,7 @@ def run_reconciliation(order_df, charges_df, sku_info_dict, pwn_dict,
             pwn_benchmark = difference = np.nan
 
         rows_out.append({
-            "Order Id":raw_sku and order_id,
+            "Order Id": order_id,
             "SKU":raw_sku, "Product":product, "Brand Name":brand_name,
             "Ordered On":ordered_on, "Sub-Category":sub_cat,
             "Charge Method":charge_method, "Qty":quantity,
@@ -384,10 +350,7 @@ def run_reconciliation(order_df, charges_df, sku_info_dict, pwn_dict,
             "PWN Match":full_match_note, "Difference":difference,
         })
 
-    df_out = pd.DataFrame(rows_out)
-    # Fix Order Id (was accidentally using short-circuit)
-    df_out["Order Id"] = order_df["Order Id"].astype(str).values
-    return df_out
+    return pd.DataFrame(rows_out)
 
 # ─── FORMATTING ───────────────────────────────────────────────────────────────
 MONEY_COLS = ["Invoice Amount","GT (As Per Calc)","Selling Price","Commission",
@@ -397,8 +360,8 @@ MONEY_COLS = ["Invoice Amount","GT (As Per Calc)","Selling Price","Commission",
 
 def fmt_inr(x):
     try:
-        if pd.isna(x): return "\u2014"
-        return f"\u20b9{float(x):,.2f}"
+        if pd.isna(x): return "—"
+        return f"₹{float(x):,.2f}"
     except: return str(x)
 
 def style_table(df, diff_col="Difference"):
@@ -478,7 +441,7 @@ def apply_roc_sheet_style(ws, df):
             else: cell.value = None if (isinstance(val,float) and np.isnan(val)) else val
             cell.border=bdr; cell.font=Font(size=9,name="Calibri"); cell.fill=alt_fill
             if col_name in money_names:
-                cell.number_format='\u20b9#,##0.00'
+                cell.number_format='₹#,##0.00'
                 cell.alignment=Alignment(horizontal="right",vertical="center")
             elif col_name=="Qty":
                 cell.alignment=Alignment(horizontal="center",vertical="center")
@@ -505,7 +468,7 @@ def apply_roc_sheet_style(ws, df):
         elif col_name in money_names:
             col_l=get_column_letter(c_idx)
             cell.value=f"=SUM({col_l}2:{col_l}{last_data_row})"
-            cell.number_format='\u20b9#,##0.00'
+            cell.number_format='₹#,##0.00'
             cell.alignment=Alignment(horizontal="right",vertical="center")
     ws.row_dimensions[total_row].height=22
 
@@ -538,19 +501,27 @@ def apply_summary_style(ws):
         elif isinstance(sc.value,(int,float)):
             cl=get_column_letter(c_idx)
             tc.value=f"=SUM({cl}2:{cl}{last_row})"
-            tc.number_format='\u20b9#,##0.00'
+            tc.number_format='₹#,##0.00'
             tc.alignment=Alignment(horizontal="right",vertical="center")
     ws.freeze_panes="A2"
 
-def to_excel(recon_df, summary_df, cat_df):
+def to_excel_multi(recon_df, summary_df, cat_df, sheet_prefix=""):
+    buf=BytesIO()
+    sname = lambda s: f"{sheet_prefix[:10]+' ' if sheet_prefix else ''}{s}"[:31]
+    with pd.ExcelWriter(buf,engine="openpyxl") as writer:
+        recon_df.to_excel(writer,index=False,sheet_name=sname("Reconciliation"))
+        cat_df.to_excel(writer,index=False,sheet_name=sname("Category Breakdown"))
+        summary_df.to_excel(writer,index=False,sheet_name=sname("Charges Summary"))
+        apply_roc_sheet_style(writer.sheets[sname("Reconciliation")],recon_df)
+        apply_summary_style(writer.sheets[sname("Category Breakdown")])
+        apply_summary_style(writer.sheets[sname("Charges Summary")])
+    return buf.getvalue()
+
+def to_excel_unmatched(df):
     buf=BytesIO()
     with pd.ExcelWriter(buf,engine="openpyxl") as writer:
-        recon_df.to_excel(writer,index=False,sheet_name="Reconciliation")
-        cat_df.to_excel(writer,index=False,sheet_name="Category Breakdown")
-        summary_df.to_excel(writer,index=False,sheet_name="Charges Summary")
-        apply_roc_sheet_style(writer.sheets["Reconciliation"],recon_df)
-        apply_summary_style(writer.sheets["Category Breakdown"])
-        apply_summary_style(writer.sheets["Charges Summary"])
+        df.to_excel(writer,index=False,sheet_name="Unmatched Orders")
+        apply_summary_style(writer.sheets["Unmatched Orders"])
     return buf.getvalue()
 
 # ─── SUMMARY ──────────────────────────────────────────────────────────────────
@@ -576,13 +547,19 @@ def build_summary(df):
         ("Net Difference vs PWN",valid["Difference"].sum()),
         ("Orders with -ve Diff",int((valid["Difference"]<0).sum())),
         ("Orders with +ve Diff",int((valid["Difference"]>0).sum())),
-        ("Orders \u2013 No PWN found",int(df["Difference"].isna().sum())),
+        ("Orders – No PWN found",int(df["Difference"].isna().sum())),
         ("Avg Received per Order",valid["Received Amount"].mean()),
         ("Avg Difference per Order",valid["Difference"].mean()),
     ]:
         totals["Metric"].append(label)
         totals["Value"].append(round(val,2) if isinstance(val,float) else val)
     summary_df=pd.DataFrame(totals)
+    if valid.empty:
+        cat_df=pd.DataFrame(columns=["Sub-Category","Orders","Invoice Total","GT Total",
+            "Selling Total","Commission","Collection Fee","Fixed Fee","Total Charges",
+            "GST Total","TDS Total","TCS Total","Total Deductions","Received Total",
+            "Net Difference","Avg Difference"])
+        return summary_df, cat_df
     cat_df=(
         valid.groupby("Sub-Category")
         .agg(Orders=("Order Id","count"),
@@ -608,161 +585,57 @@ def build_summary(df):
                     "Received Total","Net Difference","Avg Difference"]
     return summary_df, cat_df
 
-# ─── SESSION STATE ────────────────────────────────────────────────────────────
-for k,v in [("pwn_overrides",{}),("sku_corrections",{}),("result_df",None),
-            ("charges_df",None),("sku_info_dict",{}),("pwn_dict",{}),
-            ("order_df",None),("replace_map",{})]:
-    if k not in st.session_state: st.session_state[k]=v
+# ─── DISPLAY COLS ─────────────────────────────────────────────────────────────
+DISPLAY_COLS = ["Order Id","SKU","Product","Brand Name","Ordered On","Sub-Category",
+                "Charge Method","Qty","Invoice Amount","GT (As Per Calc)","Selling Price",
+                "Commission","Collection Fee","Fixed Fee","Total Charges","GST on Charges",
+                "Taxable Value","TDS","TCS","Total Deductions","Received Amount",
+                "PWN","PWN Benchmark","Difference","PWN Match"]
 
-# ─── MAIN ─────────────────────────────────────────────────────────────────────
-if order_files and charges_file:
-    with st.spinner("\U0001f504 Reading files\u2026"):
-        order_df,file_info,file_errors = load_all_order_files(order_files)
-        st.sidebar.markdown("---"); st.sidebar.markdown("**\U0001f4c4 Uploaded Order Files**")
-        st.sidebar.dataframe(pd.DataFrame(file_info),hide_index=True,use_container_width=True)
-        st.sidebar.caption(f"Total rows loaded: **{len(order_df):,}**")
-        for err in file_errors: st.warning(f"\u26a0\ufe0f {err}")
-        if order_df.empty: st.error("\u274c No valid order rows loaded."); st.stop()
+# ─── RENDER ONE ACCOUNT TAB ───────────────────────────────────────────────────
+def render_account_tab(acc_name, result_df, summary_df, cat_df, fixed_fee, gst_rate,
+                       sku_info_dict, pwn_dict, replace_map):
+    if result_df is None or result_df.empty:
+        st.info(f"No orders processed yet for **{acc_name}**. Upload Order file and Data Excel in the sidebar.")
+        return
 
-        xl=pd.read_excel(charges_file,sheet_name=None,header=None)
-        sheets=list(xl.values())
-        if len(sheets)<3:
-            st.error(f"\u274c Data Excel needs \u22653 sheets. Found: {list(xl.keys())}"); st.stop()
+    valid = result_df[result_df["Received Amount"].notna()]
 
-        charges_df    = parse_charges_df(sheets[0])
-        sku_info_dict = parse_sku_info(sheets[1])
-        pwn_dict      = parse_pwn_dict(sheets[2])
-        replace_map   = parse_replace_map(replace_sku_file) if replace_sku_file else {}
-        if replace_sku_file: st.sidebar.success(f"\u2705 Replace SKU loaded: {len(replace_map):,} entries")
+    # ── Metrics row ──────────────────────────────────────────────────────────
+    st.markdown("### 📊 Summary")
+    k1,k2,k3,k4,k5,k6,k7,k8,k9,k10 = st.columns(10)
+    k1.metric("Orders", f"{len(result_df):,}")
+    k2.metric("Invoice Total", f"₹{result_df['Invoice Amount'].sum():,.0f}")
+    k3.metric("GT Total", f"₹{valid['GT (As Per Calc)'].sum():,.0f}")
+    k4.metric("Selling Total", f"₹{valid['Selling Price'].sum():,.0f}")
+    k5.metric("Total Charges", f"₹{valid['Total Charges'].sum():,.0f}")
+    k6.metric("GST on Charges", f"₹{valid['GST on Charges'].sum():,.0f}")
+    k7.metric("Total TDS", f"₹{valid['TDS'].sum():,.2f}")
+    k8.metric("Total TCS", f"₹{valid['TCS'].sum():,.2f}")
+    k9.metric("Received Total", f"₹{valid['Received Amount'].sum():,.0f}")
+    net = valid["Difference"].sum()
+    k10.metric("Net Difference", f"₹{net:,.2f}",
+               delta=f"{'▲' if net>=0 else '▼'} {abs(net):,.2f}",
+               delta_color="normal" if net>=0 else "inverse")
+    st.markdown("---")
 
-        known_brands = sorted(charges_df["Brand Name"].dropna().unique().tolist()) if "Brand Name" in charges_df.columns else []
-        st.sidebar.markdown(f"**Brands in Charges Sheet:** {', '.join(known_brands)}")
-        st.session_state.update({"charges_df":charges_df,"sku_info_dict":sku_info_dict,
-                                  "pwn_dict":pwn_dict,"order_df":order_df,"replace_map":replace_map})
+    # ── Sub-tabs ─────────────────────────────────────────────────────────────
+    t1, t2, t3 = st.tabs(["📋 Reconciliation", "💰 Charges Summary", "📊 Category Breakdown"])
 
-        with st.expander("\U0001f50d Debug: Brand & Sub-Category Detection (first 20 rows)", expanded=False):
-            sample = order_df[["SKU","Product"]].head(20).copy()
-            sample["Brand (from Product)"] = sample["Product"].apply(extract_brand_from_product)
-            sample["Sub-Category"] = sample["SKU"].apply(lambda s: lookup_sub_cat(s,sku_info_dict)[0])
-            sample["Charge Rows"] = sample.apply(
-                lambda r: len(_filter_brand_cat(charges_df,r["Brand (from Product)"],r["Sub-Category"])), axis=1)
-            sample["Ready"] = sample["Charge Rows"].apply(lambda x: "\u2705" if x>0 else "\u274c")
-            st.dataframe(sample, use_container_width=True)
-            st.markdown(f"**Brands in Sheet 0:** {', '.join(known_brands)}")
-            cats = sorted(charges_df["Category"].dropna().unique().tolist()) if "Category" in charges_df.columns else []
-            st.markdown(f"**Categories in Sheet 0:** {', '.join(cats)}")
+    with t1:
+        f1,f2,f3,f4 = st.columns([2,2,2,3])
+        sel_cat   = f1.selectbox("Sub-Category", ["All"]+sorted(result_df["Sub-Category"].dropna().unique().tolist()), key=f"cat_{acc_name}")
+        sel_brand = f2.selectbox("Brand", ["All"]+sorted(result_df["Brand Name"].dropna().unique().tolist()), key=f"brand_{acc_name}")
+        diff_opt  = f3.selectbox("Difference type", ["All","Positive (+)","Negative (−)","Zero / Matched","No PWN data","No Category (NaN)"], key=f"diff_{acc_name}")
+        search    = f4.text_input("🔎 Search by SKU or Order ID", key=f"search_{acc_name}")
 
-        with st.expander("\U0001f4ca Sheet Structure", expanded=False):
-            st.markdown("**Sheet 0 (first 15 rows):**"); st.dataframe(charges_df.head(15),use_container_width=True)
-            s1_sample=pd.DataFrame([{"SKU":k,"Sub-Cat":v.get("sub_cat","")} for k,v in list(sku_info_dict.items())[:15]])
-            st.markdown("**Sheet 1 (first 15):**"); st.dataframe(s1_sample,use_container_width=True)
-            s2_sample=pd.DataFrame([{"SKU":k,"PWN":v} for k,v in list(pwn_dict.items())[:15]])
-            st.markdown("**Sheet 2 (first 15):**"); st.dataframe(s2_sample,use_container_width=True)
-
-    result_df = run_reconciliation(
-        st.session_state["order_df"], st.session_state["charges_df"],
-        st.session_state["sku_info_dict"], st.session_state["pwn_dict"],
-        fixed_fee, gst_rate,
-        replace_map=st.session_state["replace_map"],
-        pwn_overrides=st.session_state["pwn_overrides"],
-        sku_corrections=st.session_state["sku_corrections"],
-    )
-    st.session_state["result_df"] = result_df
-    summary_df, cat_df = build_summary(result_df)
-
-    replace_resolved = result_df[result_df["PWN Match"].str.startswith("replace",na=False)]
-    st.success(
-        f"\u2705 Processed **{len(result_df):,}** orders  |  "
-        f"**{int(result_df['Received Amount'].notna().sum()):,}** calculated  |  "
-        f"**{int(result_df['Received Amount'].isna().sum()):,}** skipped"
-        + (f"  |  **{len(replace_resolved):,}** PWN via Replace SKU" if len(replace_resolved) else "")
-    )
-
-    tab1,tab2,tab3 = st.tabs(["\U0001f4cb  Reconciliation","\U0001f4b0  Charges Summary","\U0001f4ca  Category Breakdown"])
-
-    with tab1:
-        broken_df = result_df[result_df["Received Amount"].isna()|(result_df["PWN Match"]=="not_found")]
-        if len(broken_df):
-            no_cat=int(broken_df["Received Amount"].isna().sum())
-            no_pwn=int((broken_df["PWN Match"]=="not_found").sum())
-            with st.expander(f"\u270f\ufe0f  **{len(broken_df)} SKU(s) have lookup issues**", expanded=False):
-                st.info("Type corrected SKU to re-run all lookups.")
-                st.caption(f"\U0001f534 No category/GT: **{no_cat}**  |  \U0001f7e1 No PWN: **{no_pwn}**")
-                broken_skus = broken_df["SKU"].unique().tolist()
-                correction_inputs = {}
-                h1,h2,h3,h4 = st.columns([3,2,2,3])
-                h1.markdown("**Original SKU**"); h2.markdown("**Issue**")
-                h3.markdown("**Corrected SKU**"); h4.markdown("**Live preview**")
-                st.markdown("---")
-                for sku in broken_skus:
-                    sku_rows=broken_df[broken_df["SKU"]==sku]
-                    issues=[]
-                    if sku_rows["Received Amount"].isna().any(): issues.append("\u274c No category/GT")
-                    if (sku_rows["PWN Match"]=="not_found").any(): issues.append("\u26a0\ufe0f No PWN")
-                    existing=st.session_state["sku_corrections"].get(sku.upper(),"")
-                    c1,c2,c3,c4=st.columns([3,2,2,3])
-                    c1.markdown(f"<div style='padding-top:6px;font-size:0.88rem;word-break:break-all'><code>{sku}</code></div>",unsafe_allow_html=True)
-                    c2.markdown(f"<div style='padding-top:6px;font-size:0.82rem'>{'  &  '.join(issues)}</div>",unsafe_allow_html=True)
-                    corrected=c3.text_input("Corrected SKU",value=existing,placeholder="e.g. YK1234-L",
-                                            label_visibility="collapsed",key=f"sku_corr_{sku}")
-                    correction_inputs[sku]=corrected.strip()
-                    if existing:
-                        sc_p,_=lookup_sub_cat(existing,st.session_state["sku_info_dict"])
-                        pwn_v,_=lookup_pwn_with_replace(strip_vendor_prefix(existing),st.session_state["pwn_dict"],st.session_state["replace_map"])
-                        parts=[]
-                        if sc_p and sc_p!="nan": parts.append(f"\U0001f4e6 Sub-cat: *{sc_p}*")
-                        if pd.notna(pwn_v): parts.append(f"\U0001f4b0 PWN: \u20b9{pwn_v:,.2f}")
-                        html=("<div style='padding-top:4px;font-size:0.80rem;color:#1a7a3c;line-height:1.6'>"+
-                              "<br>".join(parts)+"</div>") if parts else "<div style='padding-top:6px;font-size:0.80rem;color:#c0392b'>\u26a0\ufe0f Still unresolved</div>"
-                        c4.markdown(html,unsafe_allow_html=True)
-                    else:
-                        c4.markdown("<div style='padding-top:6px;font-size:0.80rem;color:#aaa'>\u2014 type a correction to preview \u2014</div>",unsafe_allow_html=True)
-                st.markdown("---")
-                cs,cc=st.columns([2,1])
-                if cs.button("\U0001f4be  Save SKU Corrections & Recalculate",type="primary"):
-                    st.session_state["sku_corrections"]={o.upper():c for o,c in correction_inputs.items() if c}
-                    st.rerun()
-                if cc.button("\U0001f5d1\ufe0f  Clear All Corrections"):
-                    st.session_state["sku_corrections"]={}; st.rerun()
-
-        if st.session_state["sku_corrections"]:
-            with st.expander(f"\u2705  **{len(st.session_state['sku_corrections'])} correction(s) active**",expanded=False):
-                st.dataframe(pd.DataFrame([{"Original SKU":o,"\u2192 Corrected SKU":c}
-                    for o,c in st.session_state["sku_corrections"].items()]),use_container_width=True,hide_index=True)
-                if st.button("\U0001f5d1\ufe0f  Clear All Active Corrections",key="clear_corr_summary"):
-                    st.session_state["sku_corrections"]={}; st.rerun()
-
-        st.markdown("### \U0001f4ca Summary")
-        valid=result_df[result_df["Received Amount"].notna()]
-        k1,k2,k3,k4,k5,k6,k7,k8,k9,k10=st.columns(10)
-        k1.metric("Orders",f"{len(result_df):,}")
-        k2.metric("Invoice Total",f"\u20b9{result_df['Invoice Amount'].sum():,.0f}")
-        k3.metric("GT Total",f"\u20b9{valid['GT (As Per Calc)'].sum():,.0f}")
-        k4.metric("Selling Total",f"\u20b9{valid['Selling Price'].sum():,.0f}")
-        k5.metric("Total Charges",f"\u20b9{valid['Total Charges'].sum():,.0f}")
-        k6.metric("GST on Charges",f"\u20b9{valid['GST on Charges'].sum():,.0f}")
-        k7.metric("Total TDS",f"\u20b9{valid['TDS'].sum():,.2f}")
-        k8.metric("Total TCS",f"\u20b9{valid['TCS'].sum():,.2f}")
-        k9.metric("Received Total",f"\u20b9{valid['Received Amount'].sum():,.0f}")
-        net=valid["Difference"].sum()
-        k10.metric("Net Difference",f"\u20b9{net:,.2f}",
-                   delta=f"{'▲' if net>=0 else '▼'} {abs(net):,.2f}",
-                   delta_color="normal" if net>=0 else "inverse")
-        st.markdown("---")
-
-        f1,f2,f3,f4=st.columns([2,2,2,3])
-        sel_cat  =f1.selectbox("Sub-Category",["All"]+sorted(result_df["Sub-Category"].dropna().unique().tolist()))
-        sel_brand=f2.selectbox("Brand",       ["All"]+sorted(result_df["Brand Name"].dropna().unique().tolist()))
-        diff_opt =f3.selectbox("Difference type",["All","Positive (+)","Negative (\u2212)","Zero / Matched","No PWN data","No Category (NaN)"])
-        search   =f4.text_input("\U0001f50e Search by SKU or Order ID")
-
-        view=result_df.copy()
-        if sel_cat  !="All": view=view[view["Sub-Category"]==sel_cat]
-        if sel_brand!="All": view=view[view["Brand Name"]==sel_brand]
-        if diff_opt=="Positive (+)":        view=view[view["Difference"]>0]
-        elif diff_opt=="Negative (\u2212)": view=view[view["Difference"]<0]
-        elif diff_opt=="Zero / Matched":    view=view[view["Difference"]==0]
-        elif diff_opt=="No PWN data":       view=view[view["PWN Match"]=="not_found"]
+        view = result_df.copy()
+        if sel_cat   !="All": view=view[view["Sub-Category"]==sel_cat]
+        if sel_brand !="All": view=view[view["Brand Name"]==sel_brand]
+        if diff_opt=="Positive (+)":    view=view[view["Difference"]>0]
+        elif diff_opt=="Negative (−)":  view=view[view["Difference"]<0]
+        elif diff_opt=="Zero / Matched":view=view[view["Difference"]==0]
+        elif diff_opt=="No PWN data":   view=view[view["PWN Match"]=="not_found"]
         elif diff_opt=="No Category (NaN)": view=view[view["Received Amount"].isna()]
         if search.strip():
             mask=(view["SKU"].str.contains(search.strip(),case=False,na=False)|
@@ -770,129 +643,397 @@ if order_files and charges_file:
             view=view[mask]
 
         st.caption(f"Showing **{len(view):,}** of **{len(result_df):,}** orders")
-        display_cols=["Order Id","SKU","Product","Brand Name","Ordered On","Sub-Category","Charge Method",
-                      "Qty","Invoice Amount","GT (As Per Calc)","Selling Price","Commission","Collection Fee",
-                      "Fixed Fee","Total Charges","GST on Charges","Taxable Value","TDS","TCS",
-                      "Total Deductions","Received Amount","PWN","PWN Benchmark","Difference","PWN Match"]
-        st.dataframe(style_table(view[display_cols],diff_col="Difference"),use_container_width=True,height=500)
+        cols_show = [c for c in DISPLAY_COLS if c in view.columns]
+        st.dataframe(style_table(view[cols_show], diff_col="Difference"), use_container_width=True, height=500)
 
-        st.markdown("### \U0001f4e5 Download")
-        d1,d2=st.columns(2)
-        d1.download_button("\u2b07  Full Reconciliation (Excel \u2013 3 sheets, styled)",
-            data=to_excel(result_df[display_cols],summary_df,cat_df),
-            file_name="flipkart_reconciliation.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        d2.download_button("\u2b07  Filtered View (Excel, styled)",
-            data=to_excel(view[display_cols].reset_index(drop=True),summary_df,cat_df),
-            file_name="flipkart_reconciliation_filtered.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        st.markdown("### 📥 Download")
+        d1,d2 = st.columns(2)
+        d1.download_button(
+            "⬇  Full Reconciliation (Excel – 3 sheets, styled)",
+            data=to_excel_multi(result_df[cols_show], summary_df, cat_df, sheet_prefix=acc_name[:10]),
+            file_name=f"recon_{acc_name.replace(' ','_').lower()}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key=f"dl_full_{acc_name}")
+        d2.download_button(
+            "⬇  Filtered View (Excel, styled)",
+            data=to_excel_multi(view[cols_show].reset_index(drop=True), summary_df, cat_df, sheet_prefix=acc_name[:10]),
+            file_name=f"recon_{acc_name.replace(' ','_').lower()}_filtered.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key=f"dl_filt_{acc_name}")
 
-    with tab2:
-        st.markdown("### \U0001f4b0 Total Charges Summary")
-        valid=result_df[result_df["Received Amount"].notna()]
-        col_a,col_b=st.columns(2)
+    with t2:
+        st.markdown("### 💰 Total Charges Summary")
+        col_a, col_b = st.columns(2)
         with col_a:
-            st.markdown("#### \U0001f4e4 Flipkart Deductions")
+            st.markdown("#### 📤 Flipkart Deductions")
             a1,a2=st.columns(2)
-            a1.metric("Commission",     f"\u20b9{valid['Commission'].sum():,.2f}")
-            a2.metric("Collection Fee", f"\u20b9{valid['Collection Fee'].sum():,.2f}")
-            a1.metric("Fixed Fee",      f"\u20b9{valid['Fixed Fee'].sum():,.2f}")
-            a2.metric("GST on Charges", f"\u20b9{valid['GST on Charges'].sum():,.2f}")
-            a1.metric("TDS (0.1%)",     f"\u20b9{valid['TDS'].sum():,.2f}")
-            a2.metric("TCS (0.5%)",     f"\u20b9{valid['TCS'].sum():,.2f}")
-            st.metric("\U0001f534 Total Deductions",f"\u20b9{valid['Total Deductions'].sum():,.2f}")
+            a1.metric("Commission",     f"₹{valid['Commission'].sum():,.2f}")
+            a2.metric("Collection Fee", f"₹{valid['Collection Fee'].sum():,.2f}")
+            a1.metric("Fixed Fee",      f"₹{valid['Fixed Fee'].sum():,.2f}")
+            a2.metric("GST on Charges", f"₹{valid['GST on Charges'].sum():,.2f}")
+            a1.metric("TDS (0.1%)",     f"₹{valid['TDS'].sum():,.2f}")
+            a2.metric("TCS (0.5%)",     f"₹{valid['TCS'].sum():,.2f}")
+            st.metric("🔴 Total Deductions", f"₹{valid['Total Deductions'].sum():,.2f}")
         with col_b:
-            st.markdown("#### \U0001f4e5 What You Receive")
+            st.markdown("#### 📥 What You Receive")
             b1,b2=st.columns(2)
-            b1.metric("Total Invoice",  f"\u20b9{result_df['Invoice Amount'].sum():,.2f}")
-            b2.metric("GT Total",       f"\u20b9{valid['GT (As Per Calc)'].sum():,.2f}")
-            b1.metric("Selling Total",  f"\u20b9{valid['Selling Price'].sum():,.2f}")
-            b2.metric("Total Received", f"\u20b9{valid['Received Amount'].sum():,.2f}")
-            net=valid["Difference"].sum()
-            b1.metric("Net Diff vs PWN",f"\u20b9{net:,.2f}",
-                      delta=f"{'▲' if net>=0 else '▼'} {abs(net):,.2f}",
-                      delta_color="normal" if net>=0 else "inverse")
-            b2.metric("Orders \u2212ve Diff",int((valid["Difference"]<0).sum()))
-        st.info(
-            "\u2139\ufe0f  **Brand** \u2192 from Product name (Yash Gallery / KALINI / Tasrika)  \n"
-            "**Sub-Category** \u2192 from Sheet 1 via SKU lookup  \n"
-            "**GT** \u2192 slab on Invoice Amount (fixed \u20b9)  \n"
-            "**Commission & Collection** \u2192 independent slabs on Selling Price  \n"
-            "**Received Amount** = Selling Price \u2212 Total Charges \u2212 GST \u2212 TDS \u2212 TCS  \n"
-            "**Taxable Value** = Selling Price \u2212 (Selling Price / 105 \u00d7 5)  \n"
-            "**Difference** = Received Amount \u2212 (Qty \u00d7 PWN)"
-        )
+            b1.metric("Total Invoice", f"₹{result_df['Invoice Amount'].sum():,.2f}")
+            b2.metric("GT Total",      f"₹{valid['GT (As Per Calc)'].sum():,.2f}")
+            b1.metric("Selling Total", f"₹{valid['Selling Price'].sum():,.2f}")
+            b2.metric("Total Received",f"₹{valid['Received Amount'].sum():,.2f}")
+            net2=valid["Difference"].sum()
+            b1.metric("Net Diff vs PWN",f"₹{net2:,.2f}",
+                      delta=f"{'▲' if net2>=0 else '▼'} {abs(net2):,.2f}",
+                      delta_color="normal" if net2>=0 else "inverse")
+            b2.metric("Orders −ve Diff",int((valid["Difference"]<0).sum()))
         st.markdown("---")
-        st.markdown("#### \U0001f4cb Per-Order Charges Detail")
+        st.markdown("#### 📋 Per-Order Charges Detail")
         charge_cols=["Order Id","SKU","Brand Name","Sub-Category","Charge Method",
                      "Invoice Amount","GT (As Per Calc)","Selling Price","Commission","Collection Fee",
                      "Fixed Fee","Total Charges","GST on Charges","Taxable Value","TDS","TCS",
                      "Total Deductions","Received Amount"]
-        st.dataframe(style_table(result_df[charge_cols]),use_container_width=True,height=480)
-        st.markdown("---")
-        st.markdown("#### \U0001f9fe Grand Summary Table")
-        st.dataframe(summary_df,use_container_width=True)
+        cc = [c for c in charge_cols if c in result_df.columns]
+        st.dataframe(style_table(result_df[cc]), use_container_width=True, height=480)
+        st.markdown("#### 🧾 Grand Summary Table")
+        st.dataframe(summary_df, use_container_width=True)
 
-    with tab3:
-        st.markdown("### \U0001f4ca Sub-Category-wise Breakdown")
+    with t3:
+        st.markdown("### 📊 Sub-Category-wise Breakdown")
         cat_money=[c for c in cat_df.columns if c not in ("Sub-Category","Orders")]
-        st.dataframe(style_table(cat_df,diff_col="Net Difference").format({c:"\u20b9{:.2f}" for c in cat_money}),
-                     use_container_width=True)
-        st.markdown("---")
-        st.markdown("#### \U0001f522 Charge Components (per Sub-Category)")
-        comp_cols=["Sub-Category","Orders","GT Total","Commission","Collection Fee",
-                   "Fixed Fee","GST Total","TDS Total","TCS Total","Total Deductions"]
-        comp_money=[c for c in comp_cols if c not in ("Sub-Category","Orders")]
-        st.dataframe(cat_df[comp_cols].style.format({c:"\u20b9{:.2f}" for c in comp_money}),
-                     use_container_width=True)
+        if not cat_df.empty:
+            st.dataframe(style_table(cat_df, diff_col="Net Difference")
+                         .format({c:"₹{:.2f}" for c in cat_money}),
+                         use_container_width=True)
+            st.markdown("---")
+            st.markdown("#### 🔢 Charge Components (per Sub-Category)")
+            comp_cols=["Sub-Category","Orders","GT Total","Commission","Collection Fee",
+                       "Fixed Fee","GST Total","TDS Total","TCS Total","Total Deductions"]
+            comp_money=[c for c in comp_cols if c not in ("Sub-Category","Orders")]
+            st.dataframe(cat_df[comp_cols].style.format({c:"₹{:.2f}" for c in comp_money}),
+                         use_container_width=True)
+        else:
+            st.info("No calculated orders to break down.")
+
+# ─── SESSION STATE ────────────────────────────────────────────────────────────
+defaults = {
+    "pwn_overrides": {},
+    "sku_corrections": {},
+    "replace_map": {},
+    # per-account results
+    "results": {acc: None for acc in ACCOUNT_NAMES},
+    "summaries": {acc: None for acc in ACCOUNT_NAMES},
+    "cat_dfs": {acc: None for acc in ACCOUNT_NAMES},
+    "unmatched_df": None,
+    # per-account data files
+    "charges_dfs": {acc: None for acc in ACCOUNT_NAMES},
+    "sku_info_dicts": {acc: {} for acc in ACCOUNT_NAMES},
+    "pwn_dicts": {acc: {} for acc in ACCOUNT_NAMES},
+    # per-account order dfs
+    "order_dfs": {acc: None for acc in ACCOUNT_NAMES},
+}
+for k,v in defaults.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
+
+# ─── SIDEBAR ──────────────────────────────────────────────────────────────────
+with st.sidebar:
+    st.header("📂 Upload Files")
+
+    st.markdown("#### 1️⃣ Yash Gallery")
+    yg_orders  = st.file_uploader("Order File(s) – Yash Gallery",  type=["csv","xlsx","xls"], accept_multiple_files=True, key="up_ord_yg")
+    yg_data    = st.file_uploader("Data Excel – Yash Gallery",     type=["xlsx"], key="up_data_yg")
+
+    st.markdown("#### 2️⃣ Pushpa Enterprises")
+    pe_orders  = st.file_uploader("Order File(s) – Pushpa Enterprises", type=["csv","xlsx","xls"], accept_multiple_files=True, key="up_ord_pe")
+    pe_data    = st.file_uploader("Data Excel – Pushpa Enterprises",    type=["xlsx"], key="up_data_pe")
+
+    st.markdown("#### 3️⃣ Aashirwad Garments")
+    ag_orders  = st.file_uploader("Order File(s) – Aashirwad Garments", type=["csv","xlsx","xls"], accept_multiple_files=True, key="up_ord_ag")
+    ag_data    = st.file_uploader("Data Excel – Aashirwad Garments",    type=["xlsx"], key="up_data_ag")
+
+    st.markdown("#### 🔄 Shared")
+    replace_sku_file = st.file_uploader("Replace SKU Excel (shared, optional)", type=["xlsx"], key="up_replace")
+
+    st.markdown("---")
+    st.subheader("⚙️ Settings")
+    fixed_fee = st.number_input("Fixed Fee per order (₹)", value=5,  min_value=0, step=1)
+    gst_rate  = st.number_input("GST on charges (%)",      value=18, min_value=0, step=1) / 100
+
+    st.markdown("---")
+    st.subheader("✏️ Global SKU Corrections")
+    st.caption("Apply corrections to SKUs across all accounts before recalculating.")
+
+    all_results = [st.session_state["results"].get(a) for a in ACCOUNT_NAMES]
+    all_dfs     = [r for r in all_results if r is not None and not r.empty]
+    if all_dfs:
+        combined_broken = pd.concat([
+            r[r["Received Amount"].isna() | (r["PWN Match"]=="not_found")]
+            for r in all_dfs
+        ]).drop_duplicates(subset=["SKU"])
+        broken_skus = combined_broken["SKU"].unique().tolist()
+        if broken_skus:
+            correction_inputs = {}
+            for sku in broken_skus:
+                existing = st.session_state["sku_corrections"].get(sku.upper(),"")
+                corrected = st.text_input(
+                    f"SKU: {sku}", value=existing,
+                    placeholder="Corrected SKU",
+                    key=f"global_corr_{sku}"
+                )
+                correction_inputs[sku] = corrected.strip()
+
+            if st.button("💾 Save Corrections & Recalculate", type="primary"):
+                st.session_state["sku_corrections"] = {
+                    o.upper(): c for o, c in correction_inputs.items() if c
+                }
+                st.rerun()
+            if st.button("🗑️ Clear All Corrections"):
+                st.session_state["sku_corrections"] = {}
+                st.rerun()
+        else:
+            st.success("✅ No broken SKUs found across all accounts.")
+    else:
+        st.info("Run reconciliation first to see SKU issues here.")
+
+# ─── PROCESS UPLOADS ──────────────────────────────────────────────────────────
+ACCOUNT_UPLOADS = {
+    "Yash Gallery":        (yg_orders,  yg_data),
+    "Pushpa Enterprises":  (pe_orders,  pe_data),
+    "Aashirwad Garments":  (ag_orders,  ag_data),
+}
+
+# Load replace map
+if replace_sku_file:
+    try:
+        st.session_state["replace_map"] = parse_replace_map(replace_sku_file)
+        st.sidebar.success(f"✅ Replace SKU loaded: {len(st.session_state['replace_map']):,} entries")
+    except Exception as e:
+        st.sidebar.error(f"Replace SKU error: {e}")
+
+replace_map = st.session_state["replace_map"]
+
+any_loaded = False
+for acc_name, (order_files, data_file) in ACCOUNT_UPLOADS.items():
+    if order_files and data_file:
+        any_loaded = True
+        with st.spinner(f"⏳ Processing {acc_name}…"):
+            order_df, file_info, file_errors = load_all_order_files(order_files)
+            for err in file_errors:
+                st.warning(f"⚠️ [{acc_name}] {err}")
+            if order_df.empty:
+                st.error(f"❌ [{acc_name}] No valid order rows loaded.")
+                continue
+
+            # Parse Data Excel
+            try:
+                xl = pd.read_excel(data_file, sheet_name=None, header=None)
+                sheets = list(xl.values())
+                if len(sheets) < 3:
+                    st.error(f"❌ [{acc_name}] Data Excel needs ≥3 sheets. Found: {list(xl.keys())}")
+                    continue
+                charges_df    = parse_charges_df(sheets[0])
+                sku_info_dict = parse_sku_info(sheets[1])
+                pwn_dict      = parse_pwn_dict(sheets[2])
+            except Exception as e:
+                st.error(f"❌ [{acc_name}] Error reading Data Excel: {e}")
+                continue
+
+            st.session_state["charges_dfs"][acc_name]    = charges_df
+            st.session_state["sku_info_dicts"][acc_name] = sku_info_dict
+            st.session_state["pwn_dicts"][acc_name]      = pwn_dict
+            st.session_state["order_dfs"][acc_name]      = order_df
+
+            result_df = run_reconciliation(
+                order_df, charges_df, sku_info_dict, pwn_dict,
+                fixed_fee, gst_rate,
+                replace_map=replace_map,
+                pwn_overrides=st.session_state["pwn_overrides"],
+                sku_corrections=st.session_state["sku_corrections"],
+            )
+            summary_df, cat_df = build_summary(result_df)
+            st.session_state["results"][acc_name]  = result_df
+            st.session_state["summaries"][acc_name] = summary_df
+            st.session_state["cat_dfs"][acc_name]   = cat_df
+
+# ─── UNMATCHED: merge re-uploaded corrections ─────────────────────────────────
+# Build unmatched from all results (brand = "" or "Unmatched")
+all_result_dfs = [r for r in st.session_state["results"].values() if r is not None and not r.empty]
+if all_result_dfs:
+    combined_all = pd.concat(all_result_dfs, ignore_index=True)
+    unmatched_df = combined_all[combined_all["Brand Name"]==""].copy()
+    st.session_state["unmatched_df"] = unmatched_df
+else:
+    unmatched_df = st.session_state.get("unmatched_df") or pd.DataFrame()
+
+# ─── MAIN TABS ────────────────────────────────────────────────────────────────
+if any_loaded or any(r is not None for r in st.session_state["results"].values()):
+    tab_yg, tab_pe, tab_ag, tab_um = st.tabs([
+        "🏷️ Yash Gallery",
+        "🌸 Pushpa Enterprises",
+        "🧵 Aashirwad Garments",
+        f"⚠️ Unmatched ({len(unmatched_df) if unmatched_df is not None else 0})",
+    ])
+
+    with tab_yg:
+        render_account_tab(
+            "Yash Gallery",
+            st.session_state["results"]["Yash Gallery"],
+            st.session_state["summaries"]["Yash Gallery"],
+            st.session_state["cat_dfs"]["Yash Gallery"],
+            fixed_fee, gst_rate,
+            st.session_state["sku_info_dicts"]["Yash Gallery"],
+            st.session_state["pwn_dicts"]["Yash Gallery"],
+            replace_map,
+        )
+
+    with tab_pe:
+        render_account_tab(
+            "Pushpa Enterprises",
+            st.session_state["results"]["Pushpa Enterprises"],
+            st.session_state["summaries"]["Pushpa Enterprises"],
+            st.session_state["cat_dfs"]["Pushpa Enterprises"],
+            fixed_fee, gst_rate,
+            st.session_state["sku_info_dicts"]["Pushpa Enterprises"],
+            st.session_state["pwn_dicts"]["Pushpa Enterprises"],
+            replace_map,
+        )
+
+    with tab_ag:
+        render_account_tab(
+            "Aashirwad Garments",
+            st.session_state["results"]["Aashirwad Garments"],
+            st.session_state["summaries"]["Aashirwad Garments"],
+            st.session_state["cat_dfs"]["Aashirwad Garments"],
+            fixed_fee, gst_rate,
+            st.session_state["sku_info_dicts"]["Aashirwad Garments"],
+            st.session_state["pwn_dicts"]["Aashirwad Garments"],
+            replace_map,
+        )
+
+    with tab_um:
+        st.markdown("### ⚠️ Unmatched Orders")
+        st.caption("These orders had no recognized brand prefix in their Product name.")
+
+        if unmatched_df is not None and not unmatched_df.empty:
+            st.error(f"**{len(unmatched_df):,}** unmatched orders found.")
+            ucols = [c for c in DISPLAY_COLS if c in unmatched_df.columns]
+            st.dataframe(unmatched_df[ucols], use_container_width=True, height=400)
+
+            st.markdown("#### 📥 Step 1 – Download Unmatched Orders")
+            st.download_button(
+                "⬇  Download Unmatched Orders (Excel)",
+                data=to_excel_unmatched(unmatched_df[ucols]),
+                file_name="unmatched_orders.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="dl_unmatched"
+            )
+
+            st.markdown("---")
+            st.markdown("#### 📤 Step 2 – Re-upload Corrected File")
+            st.info(
+                "Fix the **Product** column in the downloaded file so the brand prefix is recognized "
+                "(e.g. `Yash Gallery`, `KALINI`, `Tasrika`, `AKIKO`, `Pushpa`, `HouseOfCommon`, `IKRASS`), "
+                "then re-upload below. The corrected orders will be merged back into the correct account tab."
+            )
+            corrected_upload = st.file_uploader(
+                "Upload Corrected Unmatched File (CSV / XLSX)",
+                type=["csv","xlsx","xls"],
+                key="up_corrected_unmatched"
+            )
+            if corrected_upload:
+                corr_df, corr_err = read_order_file(corrected_upload)
+                if corr_err:
+                    st.error(f"Error reading corrected file: {corr_err}")
+                else:
+                    st.success(f"✅ Corrected file loaded: **{len(corr_df):,}** rows")
+                    # Re-run reconciliation for each corrected row using correct account's data
+                    merge_counts = defaultdict(int)
+                    for acc_name in ACCOUNT_NAMES:
+                        acc_brands_lower = [b.lower() for b in ACCOUNTS[acc_name]["brands"]]
+                        acc_rows = corr_df[corr_df["Product"].apply(
+                            lambda p: any(str(p).strip().lower().startswith(b) for b in acc_brands_lower)
+                        )]
+                        if acc_rows.empty:
+                            continue
+                        charges_df    = st.session_state["charges_dfs"].get(acc_name)
+                        sku_info_dict = st.session_state["sku_info_dicts"].get(acc_name, {})
+                        pwn_dict      = st.session_state["pwn_dicts"].get(acc_name, {})
+                        if charges_df is None:
+                            st.warning(f"⚠️ No Data Excel loaded for **{acc_name}** — cannot merge corrected rows.")
+                            continue
+                        new_result = run_reconciliation(
+                            acc_rows.reset_index(drop=True),
+                            charges_df, sku_info_dict, pwn_dict,
+                            fixed_fee, gst_rate,
+                            replace_map=replace_map,
+                            pwn_overrides=st.session_state["pwn_overrides"],
+                            sku_corrections=st.session_state["sku_corrections"],
+                        )
+                        existing = st.session_state["results"].get(acc_name)
+                        if existing is not None and not existing.empty:
+                            merged = pd.concat([existing, new_result], ignore_index=True)
+                        else:
+                            merged = new_result
+                        summary_df, cat_df = build_summary(merged)
+                        st.session_state["results"][acc_name]   = merged
+                        st.session_state["summaries"][acc_name] = summary_df
+                        st.session_state["cat_dfs"][acc_name]   = cat_df
+                        merge_counts[acc_name] += len(new_result)
+
+                    still_unmatched = corr_df[corr_df["Product"].apply(
+                        lambda p: extract_brand_from_product(str(p)) == ""
+                    )]
+                    for acc_name, cnt in merge_counts.items():
+                        st.success(f"✅ Merged **{cnt}** corrected orders into **{acc_name}**")
+                    if not still_unmatched.empty:
+                        st.warning(f"⚠️ **{len(still_unmatched)}** rows still unmatched after correction.")
+                    if merge_counts:
+                        st.button("🔄 Refresh to see updated tabs", on_click=st.rerun)
+        else:
+            st.success("🎉 No unmatched orders! All products were recognized.")
 
 else:
-    st.info("\U0001f448 Upload **order file(s)** and the **Data Excel** in the sidebar to begin.")
+    st.info("👈 Upload **Order files** and **Data Excel** for each account in the sidebar to begin.")
     st.markdown("""
 ---
 ### How it works
 
 | File | Description |
 |------|-------------|
-| **Order File(s)** | Flipkart Seller Hub export (CSV / XLSX / XLS) |
-| **Data Excel** | Yash Gallery workbook \u2014 3 sheets |
-| **Replace SKU Excel** *(optional)* | Seller SKU \u2192 OMS SKU mapping |
+| **Order File(s)** | Flipkart Seller Hub export per account (CSV / XLSX / XLS) |
+| **Data Excel** | Per-account workbook — 3 sheets (Charges, SKU Info, PWN) |
+| **Replace SKU Excel** *(optional, shared)* | Seller SKU → OMS SKU mapping |
 
 ---
-### \u2705 Brand Detection (Fixed)
+### ✅ Account → Brand Mapping
 
-Brand is read from the **Product name** in the order file \u2014 not from the SKU prefix:
-
-| Product starts with | Brand |
-|---------------------|-------|
-| `Yash Gallery` | Yash Gallery |
-| `KALINI` | KALINI |
-| `Tasrika` | Tasrika |
-
-This fixes the previous bug where stripping `KL_` from a SKU caused KALINI products
-to be incorrectly matched as Yash Gallery in Sheet 1.
+| Account | Product name starts with |
+|---|---|
+| **Yash Gallery** | `Yash Gallery`, `KALINI`, `Tasrika` |
+| **Pushpa Enterprises** | `AKIKO`, `Pushpa`, `HouseOfCommon` |
+| **Aashirwad Garments** | `IKRASS` |
 
 ---
-### \u2705 Calculation Logic
+### ✅ Calculation Logic
 
-**Step 1** \u2014 Brand from Product name  
-**Step 2** \u2014 Sub-category from Sheet 1 (SKU lookup)  
-**Step 3** \u2014 Three independent slab lookups from Sheet 0 using Brand + Sub-category:
+**Step 1** — Brand from Product name  
+**Step 2** — Sub-category from Sheet 1 (SKU lookup)  
+**Step 3** — Slab lookups from Sheet 0 using Brand + Sub-category
 
 | Charge | Input |
 |--------|-------|
 | GT | Invoice Amount |
-| Commission | Selling Price (= Invoice \u2212 GT) |
+| Commission | Selling Price (= Invoice − GT) |
 | Collection | Selling Price |
 
-**Step 4** \u2014 Final amounts:
+**Step 4** — Final amounts:
 ```
 Total Charges   = Commission + Collection Fee + Fixed Fee
-GST on Charges  = Total Charges \u00d7 18%
-Taxable Value   = Selling Price \u2212 (Selling Price / 105 \u00d7 5)
-TDS             = Taxable Value \u00d7 0.1%
-TCS             = Taxable Value \u00d7 0.5%
-Received Amount = Selling Price \u2212 Total Charges \u2212 GST \u2212 TDS \u2212 TCS
-Difference      = Received Amount \u2212 (Qty \u00d7 PWN)
+GST on Charges  = Total Charges × 18%
+Taxable Value   = Selling Price − (Selling Price / 105 × 5)
+TDS             = Taxable Value × 0.1%
+TCS             = Taxable Value × 0.5%
+Received Amount = Selling Price − Total Charges − GST − TDS − TCS
+Difference      = Received Amount − (Qty × PWN)
 ```
 """)
