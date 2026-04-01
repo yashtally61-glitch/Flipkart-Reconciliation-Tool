@@ -181,11 +181,22 @@ def lookup_collection(brand, cat, sell_price, charges_df):
 # ─── PARSERS ──────────────────────────────────────────────────────────────────
 def parse_charges_df(raw):
     df = raw.copy()
-    df.columns = [str(c).strip() for c in raw.iloc[0].tolist()]
-    df = df.iloc[1:].reset_index(drop=True)
+    # Auto-detect header row: look for a row containing "Brand Name" or "Category"
+    header_row = 0
+    for i, row in df.iterrows():
+        vals = [str(v).strip().lower() for v in row.tolist()]
+        if "brand name" in vals or "category" in vals:
+            header_row = i
+            break
+    df.columns = [str(c).strip() for c in df.iloc[header_row].tolist()]
+    df = df.iloc[header_row+1:].reset_index(drop=True)
     if "Brand Name" in df.columns: df["Brand Name"] = df["Brand Name"].ffill()
     if "Category"   in df.columns: df["Category"]   = df["Category"].ffill()
     df = df[df["Category"].notna()].copy()
+    # Strip whitespace from all string columns
+    for col in df.columns:
+        if df[col].dtype == object:
+            df[col] = df[col].astype(str).str.strip()
     for col in ["Lower Limit Commision","Upper Limit Commision","Commision Charge",
                 "Collection Lower Limit","Collection Upper Limit",
                 "GT Lower Limit","GT Upper Limit","GT Charge"]:
@@ -286,44 +297,47 @@ def run_reconciliation(order_df, charges_df, sku_info_dict, pwn_dict,
         cat = sub_cat.strip() if sub_cat and str(sub_cat).lower() != "nan" else ""
         sku_for_pwn = strip_vendor_prefix(corrected_raw)
 
-        gt_val=sell_price=commission=coll_fee=np.nan
+        # ── initialise ALL output vars so nothing is ever unbound ──
+        gt_val = sell_price = commission = coll_fee = np.nan
+        total_charges = gst_on_charges = taxable_value = np.nan
+        tds = tcs = total_deductions = received_amount = np.nan
         charge_method = "not_found"
 
-        if brand_name and cat:
+        if not brand_name:
+            charge_method = "no_brand_in_product"
+        elif not cat:
+            charge_method = f"no_subcat|brand={brand_name}|sku={corrected_raw}"
+        else:
             gt_val = lookup_gt(brand_name, cat, inv_amount, charges_df)
-            if pd.notna(gt_val):
+            if pd.isna(gt_val):
+                charge_method = f"gt_slab_missing|{brand_name}|{cat}|inv={inv_amount}"
+            else:
                 sell_price = round(inv_amount - gt_val, 5)
                 commission = lookup_commission(brand_name, cat, sell_price, charges_df)
                 coll_fee   = lookup_collection(brand_name, cat, sell_price, charges_df)
-                if pd.notna(commission) and pd.notna(coll_fee):
-                    charge_method = f"{brand_name} | {cat}"
+                if pd.isna(commission) or pd.isna(coll_fee):
+                    charge_method = f"comm_or_coll_missing|{brand_name}|{cat}|sp={sell_price}"
+                    gt_val = sell_price = commission = coll_fee = np.nan
                 else:
-                    gt_val=sell_price=commission=coll_fee=np.nan
-
-        if pd.isna(gt_val):
-            sell_price=gt_val=commission=coll_fee=np.nan
-            total_charges=gst_on_charges=taxable_value=np.nan
-            tds=tcs=total_deductions=received_amount=np.nan
-            if not brand_name:
-                charge_method = "no_brand_in_product"
-            elif not cat:
-                charge_method = f"no_subcat|brand={brand_name}"
-            else:
-                charge_method = f"slab_missing|{brand_name}|{cat}"
-        else:
-            commission    = commission if pd.notna(commission) else 0.0
-            coll_fee      = coll_fee   if pd.notna(coll_fee)   else 0.0
-            total_charges  = round(commission + coll_fee + float(fixed_fee), 5)
-            gst_on_charges = round(total_charges * gst_rate, 5)
-            taxable_value  = round(sell_price - (sell_price / 105 * 5), 5)
-            tds            = round(taxable_value * TDS_RATE, 5)
-            tcs            = round(taxable_value * TCS_RATE, 5)
-            total_deductions = round(total_charges + gst_on_charges + tds + tcs, 5)
-            received_amount  = round(sell_price - total_charges - gst_on_charges - tds - tcs, 5)
+                    commission       = float(commission)
+                    coll_fee         = float(coll_fee)
+                    total_charges    = round(commission + coll_fee + float(fixed_fee), 5)
+                    gst_on_charges   = round(total_charges * gst_rate, 5)
+                    taxable_value    = round(sell_price - (sell_price / 105 * 5), 5)
+                    tds              = round(taxable_value * TDS_RATE, 5)
+                    tcs              = round(taxable_value * TCS_RATE, 5)
+                    total_deductions = round(total_charges + gst_on_charges + tds + tcs, 5)
+                    received_amount  = round(sell_price - total_charges - gst_on_charges - tds - tcs, 5)
+                    charge_method    = f"{brand_name} | {cat}" 
 
         pwn_val, match_method = lookup_pwn_with_replace(sku_for_pwn, pwn_dict, replace_map)
         if sku_for_pwn.upper() in pwn_overrides:
             pwn_val, match_method = float(pwn_overrides[sku_for_pwn.upper()]), "manual"
+        # manual_pwn: keyed by stripped or original SKU
+        _mpwn = manual_pwn.get(sku_for_pwn.strip().upper()) or manual_pwn.get(raw_sku.strip().upper())
+        if _mpwn is not None:
+            try: pwn_val, match_method = float(_mpwn), "manual-pwn"
+            except: pass
 
         full_match_note = match_method
         if cat_match_note and cat_match_note not in ("exact","exact-stripped"):
@@ -594,12 +608,181 @@ DISPLAY_COLS = ["Order Id","SKU","Product","Brand Name","Ordered On","Sub-Catego
 
 # ─── RENDER ONE ACCOUNT TAB ───────────────────────────────────────────────────
 def render_account_tab(acc_name, result_df, summary_df, cat_df, fixed_fee, gst_rate,
-                       sku_info_dict, pwn_dict, replace_map):
+                       sku_info_dict, pwn_dict, replace_map, charges_df=None):
     if result_df is None or result_df.empty:
         st.info(f"No orders processed yet for **{acc_name}**. Upload Order file and Data Excel in the sidebar.")
         return
 
     valid = result_df[result_df["Received Amount"].notna()]
+
+    # ── Diagnostic expander ──────────────────────────────────────────────────
+    nan_count = int(result_df["Received Amount"].isna().sum())
+    calc_count = int(result_df["Received Amount"].notna().sum())
+    if nan_count > 0:
+        with st.expander(f"🔍 **Diagnostic: {nan_count} orders NOT calculated** — click to investigate", expanded=True):
+            reason_counts = result_df[result_df["Received Amount"].isna()]["Charge Method"].value_counts()
+            st.markdown("**Why are rows blank? (Charge Method breakdown)**")
+            st.dataframe(reason_counts.reset_index().rename(columns={"index":"Reason","Charge Method":"Count"}),
+                         use_container_width=True, hide_index=True)
+            st.markdown("---")
+            st.markdown("**Sample of failed rows (first 10):**")
+            fail_cols = ["Order Id","SKU","Product","Brand Name","Sub-Category","Charge Method","Invoice Amount"]
+            fc = [c for c in fail_cols if c in result_df.columns]
+            st.dataframe(result_df[result_df["Received Amount"].isna()][fc].head(10),
+                         use_container_width=True, hide_index=True)
+            # Show what brands + categories exist in the charges sheet
+            if charges_df is not None and not charges_df.empty:
+                brands_in_sheet = sorted(charges_df["Brand Name"].dropna().unique().tolist()) if "Brand Name" in charges_df.columns else []
+                cats_in_sheet   = sorted(charges_df["Category"].dropna().unique().tolist())   if "Category"   in charges_df.columns else []
+                st.markdown(f"**Brands in your Charges sheet (Sheet 0):** `{'` | `'.join(brands_in_sheet) or 'NONE FOUND'}`")
+                st.markdown(f"**Categories in your Charges sheet (Sheet 0):** `{'` | `'.join(cats_in_sheet) or 'NONE FOUND'}`")
+                st.markdown("**Charges sheet preview (first 20 rows):**")
+                st.dataframe(charges_df.head(20), use_container_width=True)
+            st.info(
+                "**How to fix:**\n"
+                "- `no_brand_in_product` → Product name doesn't start with a known brand. Fix the Product column or add the brand prefix.\n"
+                "- `no_subcat|brand=...` → SKU not found in Sheet 1. Check SKU spelling or add it to the Sub-category sheet.\n"
+                "- `gt_slab_missing|...` → Invoice Amount not covered by any GT slab in Sheet 0. Check your GT slab ranges.\n"
+                "- `comm_or_coll_missing|...` → Selling Price not in Commission/Collection slab range."
+            )
+    else:
+        st.success(f"✅ All **{calc_count:,}** orders calculated successfully.")
+
+    # ── Missing Sub-Category / PWN panel ────────────────────────────────────
+    missing_subcat = result_df[result_df["Sub-Category"].fillna("").str.strip() == ""]
+    missing_pwn    = result_df[result_df["PWN Match"] == "not_found"]
+    missing_either = pd.concat([missing_subcat, missing_pwn]).drop_duplicates(subset=["SKU"])
+
+    if not missing_either.empty:
+        with st.expander(
+            f"✏️ **Fix Missing Data — {len(missing_either)} unique SKU(s) missing Sub-Category or PWN**",
+            expanded=False
+        ):
+            st.markdown("### Fix Missing Sub-Category & PWN Values")
+            st.caption(
+                "For each SKU below: type the correct **Sub-Category** and/or **PWN** value. "
+                "Save to recalculate. You can also re-upload corrected Sheet 1 or Sheet 2 Excel files below."
+            )
+
+            # ── Manual entry table ────────────────────────────────────────────
+            st.markdown("#### ✏️ Manual Entry")
+            existing_sc  = st.session_state["manual_sub_cats"].get(acc_name, {})
+            existing_pwn = st.session_state["manual_pwn"].get(acc_name, {})
+            new_sc_vals  = {}
+            new_pwn_vals = {}
+
+            hc1,hc2,hc3,hc4,hc5 = st.columns([3,2,2,2,2])
+            hc1.markdown("**SKU**"); hc2.markdown("**Issue**")
+            hc3.markdown("**Current Sub-Cat**"); hc4.markdown("**Enter Sub-Category**"); hc5.markdown("**Enter PWN (₹)**")
+            st.markdown("---")
+
+            for _, mrow in missing_either.iterrows():
+                sku = str(mrow["SKU"]).strip()
+                issues = []
+                if str(mrow.get("Sub-Category","")).strip() in ("","nan"): issues.append("❌ No Sub-Cat")
+                if mrow.get("PWN Match","") == "not_found":                issues.append("⚠️ No PWN")
+
+                c1,c2,c3,c4,c5 = st.columns([3,2,2,2,2])
+                c1.markdown(f"`{sku}`")
+                c2.markdown(" & ".join(issues))
+                c3.markdown(f"`{mrow.get('Sub-Category','—')}`")
+                new_sc  = c4.text_input("Sub-Cat",  value=existing_sc.get(sku.upper(),""),
+                                         placeholder="e.g. Kurta", label_visibility="collapsed",
+                                         key=f"msc_{acc_name}_{sku}")
+                new_pwn = c5.text_input("PWN",      value=str(existing_pwn.get(sku.upper(),"")) if existing_pwn.get(sku.upper()) else "",
+                                         placeholder="e.g. 250.00", label_visibility="collapsed",
+                                         key=f"mpwn_{acc_name}_{sku}")
+                new_sc_vals[sku.upper()]  = new_sc.strip()
+                new_pwn_vals[sku.upper()] = new_pwn.strip()
+
+            st.markdown("---")
+            btn_save, btn_clear = st.columns([2,1])
+            if btn_save.button(f"💾 Save & Recalculate — {acc_name}", key=f"save_manual_{acc_name}", type="primary"):
+                st.session_state["manual_sub_cats"][acc_name] = {k:v for k,v in new_sc_vals.items() if v}
+                st.session_state["manual_pwn"][acc_name]      = {}
+                for k,v in new_pwn_vals.items():
+                    if v:
+                        try: st.session_state["manual_pwn"][acc_name][k] = float(v)
+                        except: st.warning(f"PWN value for {k} is not a valid number: '{v}'")
+                # Recalculate this account immediately
+                _od = st.session_state["order_dfs"].get(acc_name)
+                _cd = st.session_state["charges_dfs"].get(acc_name)
+                _si = st.session_state["sku_info_dicts"].get(acc_name, {})
+                _pd = st.session_state["pwn_dicts"].get(acc_name, {})
+                if _od is not None and _cd is not None:
+                    _r = run_reconciliation(
+                        _od, _cd, _si, _pd, fixed_fee, gst_rate,
+                        replace_map=st.session_state["replace_map"],
+                        pwn_overrides=st.session_state["pwn_overrides"],
+                        sku_corrections=st.session_state["sku_corrections"],
+                        manual_sub_cats=st.session_state["manual_sub_cats"].get(acc_name, {}),
+                        manual_pwn=st.session_state["manual_pwn"].get(acc_name, {}),
+                    )
+                    _s, _c = build_summary(_r)
+                    st.session_state["results"][acc_name]   = _r
+                    st.session_state["summaries"][acc_name] = _s
+                    st.session_state["cat_dfs"][acc_name]   = _c
+                st.rerun()
+            if btn_clear.button(f"🗑️ Clear Manual Entries — {acc_name}", key=f"clear_manual_{acc_name}"):
+                st.session_state["manual_sub_cats"][acc_name] = {}
+                st.session_state["manual_pwn"][acc_name]      = {}
+                st.rerun()
+
+            # ── Re-upload corrected sheets ────────────────────────────────────
+            st.markdown("---")
+            st.markdown("#### 📤 Re-upload Corrected Data Sheets")
+            st.caption(
+                "Upload a corrected **Sheet 1** (SKU → Sub-category) or **Sheet 2** (OMS Child SKU → PWN+10%+50) "
+                "to merge new rows into the existing lookup tables without replacing your other data."
+            )
+            ru1, ru2 = st.columns(2)
+            new_sheet1 = ru1.file_uploader(
+                "Re-upload Sheet 1 (Sub-category)", type=["xlsx"],
+                key=f"reup_sheet1_{acc_name}"
+            )
+            new_sheet2 = ru2.file_uploader(
+                "Re-upload Sheet 2 (PWN)", type=["xlsx"],
+                key=f"reup_sheet2_{acc_name}"
+            )
+            if new_sheet1 or new_sheet2:
+                if st.button(f"🔄 Merge & Recalculate — {acc_name}", key=f"merge_sheets_{acc_name}", type="primary"):
+                    if new_sheet1:
+                        try:
+                            raw1 = pd.read_excel(new_sheet1, header=None)
+                            new_info = parse_sku_info(raw1)
+                            merged_info = {**st.session_state["sku_info_dicts"].get(acc_name, {}), **new_info}
+                            st.session_state["sku_info_dicts"][acc_name] = merged_info
+                            st.success(f"✅ Sheet 1 merged: {len(new_info):,} SKU entries added/updated.")
+                        except Exception as e:
+                            st.error(f"Sheet 1 error: {e}")
+                    if new_sheet2:
+                        try:
+                            raw2 = pd.read_excel(new_sheet2, header=None)
+                            new_pwn = parse_pwn_dict(raw2)
+                            merged_pwn = {**st.session_state["pwn_dicts"].get(acc_name, {}), **new_pwn}
+                            st.session_state["pwn_dicts"][acc_name] = merged_pwn
+                            st.success(f"✅ Sheet 2 merged: {len(new_pwn):,} PWN entries added/updated.")
+                        except Exception as e:
+                            st.error(f"Sheet 2 error: {e}")
+                    # Recalculate after merge
+                    _od = st.session_state["order_dfs"].get(acc_name)
+                    _cd = st.session_state["charges_dfs"].get(acc_name)
+                    _si = st.session_state["sku_info_dicts"].get(acc_name, {})
+                    _pd = st.session_state["pwn_dicts"].get(acc_name, {})
+                    if _od is not None and _cd is not None:
+                        _r = run_reconciliation(
+                            _od, _cd, _si, _pd, fixed_fee, gst_rate,
+                            replace_map=st.session_state["replace_map"],
+                            pwn_overrides=st.session_state["pwn_overrides"],
+                            sku_corrections=st.session_state["sku_corrections"],
+                            manual_sub_cats=st.session_state["manual_sub_cats"].get(acc_name, {}),
+                            manual_pwn=st.session_state["manual_pwn"].get(acc_name, {}),
+                        )
+                        _s, _c = build_summary(_r)
+                        st.session_state["results"][acc_name]   = _r
+                        st.session_state["summaries"][acc_name] = _s
+                        st.session_state["cat_dfs"][acc_name]   = _c
+                    st.rerun()
 
     # ── Metrics row ──────────────────────────────────────────────────────────
     st.markdown("### 📊 Summary")
@@ -719,6 +902,9 @@ defaults = {
     "pwn_overrides": {},
     "sku_corrections": {},
     "replace_map": {},
+    # per-account manual overrides  {acc: {SKU.upper(): value}}
+    "manual_sub_cats": {acc: {} for acc in ACCOUNT_NAMES},
+    "manual_pwn":      {acc: {} for acc in ACCOUNT_NAMES},
     # per-account results
     "results": {acc: None for acc in ACCOUNT_NAMES},
     "summaries": {acc: None for acc in ACCOUNT_NAMES},
@@ -849,6 +1035,8 @@ for acc_name, (order_files, data_file) in ACCOUNT_UPLOADS.items():
                 replace_map=replace_map,
                 pwn_overrides=st.session_state["pwn_overrides"],
                 sku_corrections=st.session_state["sku_corrections"],
+                manual_sub_cats=st.session_state["manual_sub_cats"].get(acc_name, {}),
+                manual_pwn=st.session_state["manual_pwn"].get(acc_name, {}),
             )
             summary_df, cat_df = build_summary(result_df)
             st.session_state["results"][acc_name]  = result_df
@@ -884,6 +1072,7 @@ if any_loaded or any(r is not None for r in st.session_state["results"].values()
             st.session_state["sku_info_dicts"]["Yash Gallery"],
             st.session_state["pwn_dicts"]["Yash Gallery"],
             replace_map,
+            charges_df=st.session_state["charges_dfs"].get("Yash Gallery"),
         )
 
     with tab_pe:
@@ -896,6 +1085,7 @@ if any_loaded or any(r is not None for r in st.session_state["results"].values()
             st.session_state["sku_info_dicts"]["Pushpa Enterprises"],
             st.session_state["pwn_dicts"]["Pushpa Enterprises"],
             replace_map,
+            charges_df=st.session_state["charges_dfs"].get("Pushpa Enterprises"),
         )
 
     with tab_ag:
@@ -908,6 +1098,7 @@ if any_loaded or any(r is not None for r in st.session_state["results"].values()
             st.session_state["sku_info_dicts"]["Aashirwad Garments"],
             st.session_state["pwn_dicts"]["Aashirwad Garments"],
             replace_map,
+            charges_df=st.session_state["charges_dfs"].get("Aashirwad Garments"),
         )
 
     with tab_um:
@@ -968,6 +1159,8 @@ if any_loaded or any(r is not None for r in st.session_state["results"].values()
                             replace_map=replace_map,
                             pwn_overrides=st.session_state["pwn_overrides"],
                             sku_corrections=st.session_state["sku_corrections"],
+                            manual_sub_cats=st.session_state["manual_sub_cats"].get(acc_name, {}),
+                            manual_pwn=st.session_state["manual_pwn"].get(acc_name, {}),
                         )
                         existing = st.session_state["results"].get(acc_name)
                         if existing is not None and not existing.empty:
