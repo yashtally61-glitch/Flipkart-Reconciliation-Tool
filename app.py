@@ -274,10 +274,13 @@ TCS_RATE = 0.005
 
 def run_reconciliation(order_df, charges_df, sku_info_dict, pwn_dict,
                        fixed_fee, gst_rate, replace_map=None,
-                       pwn_overrides=None, sku_corrections=None):
+                       pwn_overrides=None, sku_corrections=None,
+                       manual_sub_cats=None, manual_pwn=None):
     replace_map     = replace_map     or {}
     pwn_overrides   = pwn_overrides   or {}
     sku_corrections = sku_corrections or {}
+    manual_sub_cats = manual_sub_cats or {}
+    manual_pwn      = manual_pwn      or {}
     rows_out = []
 
     for _, row in order_df.iterrows():
@@ -293,7 +296,11 @@ def run_reconciliation(order_df, charges_df, sku_info_dict, pwn_dict,
             corrected_raw = replace_map[corrected_raw.strip().upper()]
 
         brand_name = extract_brand_from_product(product)
-        sub_cat, cat_match_note = lookup_sub_cat(corrected_raw, sku_info_dict)
+        sub_cat, cat_match_note = lookup_sub_cat(corrected_raw, sku_info_dict, replace_map)
+        # Manual sub-cat override
+        _manual_sc = manual_sub_cats.get(corrected_raw.strip().upper()) or manual_sub_cats.get(raw_sku.strip().upper())
+        if _manual_sc:
+            sub_cat, cat_match_note = str(_manual_sc).strip(), "manual"
         cat = sub_cat.strip() if sub_cat and str(sub_cat).lower() != "nan" else ""
         sku_for_pwn = strip_vendor_prefix(corrected_raw)
 
