@@ -161,10 +161,55 @@ def lookup_pwn_with_replace(sku: str, pwn_dict: dict, replace_map: dict) -> tupl
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _filter_brand_cat(charges_df: pd.DataFrame, brand: str, cat: str) -> pd.DataFrame:
-    return charges_df[
-        (charges_df["Brand Name"].str.strip().str.lower() == brand.strip().lower()) &
-        (charges_df["Category"].str.strip().str.lower()   == cat.strip().lower())
-    ]
+    """Filter charges by brand and category with better error handling"""
+    if not brand or not cat:
+        return pd.DataFrame()
+    
+    # Ensure columns exist
+    if "Brand Name" not in charges_df.columns or "Category" not in charges_df.columns:
+        return pd.DataFrame()
+    
+    # Normalize inputs - handle nan values
+    brand_norm = str(brand).strip().lower()
+    cat_norm = str(cat).strip().lower()
+    
+    # Skip if normalized values are 'nan'
+    if brand_norm == 'nan' or cat_norm == 'nan':
+        return pd.DataFrame()
+    
+    # Create normalized columns for matching
+    brand_mask = charges_df["Brand Name"].fillna("").astype(str).str.strip().str.lower() == brand_norm
+    cat_mask = charges_df["Category"].fillna("").astype(str).str.strip().str.lower() == cat_norm
+    
+    return charges_df[brand_mask & cat_mask].copy()
+
+
+def debug_charge_lookup(brand: str, cat: str, charges_df: pd.DataFrame) -> dict:
+    """Debug helper to see what's being matched"""
+    info = {
+        "brand_input": brand,
+        "cat_input": cat,
+        "brands_in_sheet": charges_df["Brand Name"].dropna().unique().tolist() if "Brand Name" in charges_df.columns else [],
+        "categories_in_sheet": charges_df["Category"].dropna().unique().tolist() if "Category" in charges_df.columns else [],
+        "exact_match_found": False,
+        "matched_rows": 0
+    }
+    
+    if brand and cat:
+        matched = _filter_brand_cat(charges_df, brand, cat)
+        info["exact_match_found"] = len(matched) > 0
+        info["matched_rows"] = len(matched)
+        
+        # Try to find close matches
+        if len(matched) == 0:
+            close_brands = [b for b in info["brands_in_sheet"] 
+                          if b and brand and str(b).lower().strip() == str(brand).lower().strip()]
+            close_cats = [c for c in info["categories_in_sheet"] 
+                        if c and cat and str(c).lower().strip() == str(cat).lower().strip()]
+            info["close_brand_matches"] = close_brands
+            info["close_cat_matches"] = close_cats
+    
+    return info
 
 
 def lookup_gt(brand: str, cat: str, inv_amount: float, charges_df: pd.DataFrame) -> float:
@@ -369,9 +414,16 @@ def run_reconciliation(order_df, charges_df, sku_info_dict, pwn_dict,
         inv_amount = float(row.get("Invoice Amount", 0) or 0)
         quantity   = int(row.get("Quantity", 1) or 1)
 
-        # Apply manual SKU correction
+        # STEP 1: Apply manual SKU correction FIRST (from UI corrections)
         corrected_raw = sku_corrections.get(raw_sku.upper(), raw_sku)
-        sku           = strip_vendor_prefix(corrected_raw)
+        
+        # STEP 2: Apply Replace SKU mapping (from Replace SKU Excel)
+        lookup_sku = corrected_raw.strip().upper()
+        if lookup_sku in replace_map:
+            corrected_raw = replace_map[lookup_sku]
+            
+        # STEP 3: Strip vendor prefix
+        sku = strip_vendor_prefix(corrected_raw)
 
         # ── Brand + Sub-category from Sheet 1 ────────────────────────────
         info = sku_info_dict.get(sku.upper(), {})
@@ -380,14 +432,18 @@ def run_reconciliation(order_df, charges_df, sku_info_dict, pwn_dict,
         cat_match_note = ""
 
         # Base-code fallback
-        if not sub_cat_raw or sub_cat_raw == "nan":
+        if not sub_cat_raw or str(sub_cat_raw).lower() == "nan":
             fb_sub, fb_brand, fb_sku = lookup_cat_by_base(sku, sku_info_dict)
             if fb_sub:
                 sub_cat_raw    = fb_sub
                 brand_name     = fb_brand or brand_name
                 cat_match_note = f"base-cat({fb_sku})"
 
-        cat = sub_cat_raw.strip() if sub_cat_raw and sub_cat_raw != "nan" else ""
+        # Normalize the category (remove "nan" string)
+        cat = sub_cat_raw.strip() if sub_cat_raw and str(sub_cat_raw).lower() != "nan" else ""
+        
+        # Normalize brand (remove empty/nan)
+        brand_name = brand_name.strip() if brand_name and str(brand_name).lower() != "nan" else ""
 
         # ── Independent slab lookups ──────────────────────────────────────
         # Step 1: GT from Invoice Amount slab
@@ -515,7 +571,8 @@ def style_table(df: pd.DataFrame, diff_col: str = "Difference") -> object:
 
     styler = df.style.format(fmt_dict)
     if diff_col in df.columns:
-        styler = styler.applymap(colour_diff, subset=[diff_col])
+        # Fixed: Changed from applymap to map for pandas compatibility
+        styler = styler.map(colour_diff, subset=[diff_col])
     return styler
 
 
@@ -829,6 +886,96 @@ if order_files and charges_file:
             "replace_map":   replace_map,
         })
 
+        # ═══════════════════════════════════════════════════════════════════════════
+        # DIAGNOSTIC SECTION - Check Data Mapping
+        # ═══════════════════════════════════════════════════════════════════════════
+        with st.expander("🔍 Debug: Check Data Mapping", expanded=False):
+            st.markdown("#### Sample SKU Lookups")
+            
+            # Show sample SKUs and their mappings
+            sample_skus = order_df["SKU"].head(15).tolist()
+            debug_results = []
+            
+            for raw_sku in sample_skus:
+                # Apply same logic as reconciliation
+                corrected_raw = st.session_state.get("sku_corrections", {}).get(raw_sku.upper(), raw_sku)
+                lookup_sku = corrected_raw.strip().upper()
+                if lookup_sku in replace_map:
+                    corrected_raw = replace_map[lookup_sku]
+                    
+                sku = strip_vendor_prefix(corrected_raw)
+                info = sku_info_dict.get(sku.upper(), {})
+                brand = info.get("brand", "NOT FOUND")
+                sub_cat = info.get("sub_cat", "NOT FOUND")
+                
+                # Normalize
+                brand_clean = brand.strip() if brand and str(brand).lower() != "nan" else ""
+                cat_clean = sub_cat.strip() if sub_cat and str(sub_cat).lower() != "nan" else ""
+                
+                charge_debug = debug_charge_lookup(brand_clean, cat_clean, charges_df) if brand_clean and cat_clean else {"exact_match_found": False, "matched_rows": 0}
+                
+                debug_results.append({
+                    "Original SKU": raw_sku,
+                    "After Replace": corrected_raw if corrected_raw != raw_sku else "—",
+                    "Cleaned SKU": sku,
+                    "Brand Found": brand_clean or "❌ NOT FOUND",
+                    "Sub-Category": cat_clean or "❌ NOT FOUND",
+                    "Charge Match": "✅ Yes" if charge_debug["exact_match_found"] else "❌ No",
+                    "Matched Rows": charge_debug["matched_rows"]
+                })
+            
+            st.dataframe(pd.DataFrame(debug_results), use_container_width=True)
+            
+            st.markdown("#### Available Brands in Sheet 0 (Charges)")
+            if "Brand Name" in charges_df.columns:
+                brands_list = sorted([str(b).strip() for b in charges_df["Brand Name"].dropna().unique() if str(b).lower() != 'nan'])
+                st.write(", ".join(brands_list))
+            
+            st.markdown("#### Available Categories in Sheet 0 (Charges)")
+            if "Category" in charges_df.columns:
+                cats_list = sorted([str(c).strip() for c in charges_df["Category"].dropna().unique() if str(c).lower() != 'nan'])
+                st.write(", ".join(cats_list))
+            
+            st.markdown("#### Brand-Category Combinations in Sheet 0")
+            if "Brand Name" in charges_df.columns and "Category" in charges_df.columns:
+                combos = charges_df[["Brand Name", "Category"]].drop_duplicates().dropna()
+                combos = combos[
+                    (combos["Brand Name"].astype(str).str.lower() != 'nan') & 
+                    (combos["Category"].astype(str).str.lower() != 'nan')
+                ].head(30)
+                st.dataframe(combos, use_container_width=True)
+
+        # ═══════════════════════════════════════════════════════════════════════════
+        # SHEET STRUCTURE VERIFICATION
+        # ═══════════════════════════════════════════════════════════════════════════
+        with st.expander("📊 Verify Excel Sheet Structure", expanded=False):
+            st.markdown("### Sheet 0: Charges Rates")
+            st.write(f"**Rows:** {len(charges_df)}")
+            st.write(f"**Columns:** {list(charges_df.columns)}")
+            st.dataframe(charges_df.head(15), use_container_width=True)
+            
+            st.markdown("### Sheet 1: Category Description (Sample)")
+            sample_sku_info = pd.DataFrame([
+                {"SKU": k, "Brand": v.get("brand", ""), "Sub-Category": v.get("sub_cat", "")}
+                for k, v in list(sku_info_dict.items())[:15]
+            ])
+            st.dataframe(sample_sku_info, use_container_width=True)
+            
+            st.markdown("### Sheet 2: PWN Prices (Sample)")
+            sample_pwn = pd.DataFrame([
+                {"SKU": k, "PWN Price": v}
+                for k, v in list(pwn_dict.items())[:15]
+            ])
+            st.dataframe(sample_pwn, use_container_width=True)
+            
+            if replace_map:
+                st.markdown("### Sheet 3: Replace SKU Mapping (Sample)")
+                sample_replace = pd.DataFrame([
+                    {"Seller SKU": k, "→ OMS SKU": v}
+                    for k, v in list(replace_map.items())[:15]
+                ])
+                st.dataframe(sample_replace, use_container_width=True)
+
     result_df = run_reconciliation(
         st.session_state["order_df"],
         st.session_state["charges_df"],
@@ -1073,10 +1220,16 @@ else:
 ---
 ### ✅ Correct Charge Calculation Logic
 
-**Step 1 — Brand & Sub-category from Sheet 1**
+**Step 1 — SKU Resolution Flow**
+1. Check if SKU has manual correction (from UI)
+2. Apply Replace SKU mapping (from Replace SKU Excel) 
+3. Strip vendor prefix (GWN-, SPF-, KL-, etc.)
+4. Look up in Category Description sheet
+
+**Step 2 — Brand & Sub-category from Sheet 1**
 Each SKU in Sheet 1 already has Brand + Sub-category. This is used directly — brand is not guessed from product name.
 
-**Step 2 — Three INDEPENDENT slab lookups from Sheet 0**
+**Step 3 — Three INDEPENDENT slab lookups from Sheet 0**
 
 | Charge | Input | How |
 |--------|-------|-----|
@@ -1086,7 +1239,7 @@ Each SKU in Sheet 1 already has Brand + Sub-category. This is used directly — 
 
 Each charge scans **all rows** for that Brand+Category independently.
 
-**Step 3 — Final calculation**
+**Step 4 — Final calculation**
 ```
 Total Charges    = Commission + Collection Fee + Fixed Fee
 GST on Charges   = Total Charges × 18%
