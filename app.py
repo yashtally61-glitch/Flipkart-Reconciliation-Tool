@@ -188,7 +188,7 @@ st.markdown("""
     <p class="hero-title">🧾 Flipkart Reconciliation</p>
     <p class="hero-sub">Yash Gallery Private Limited &nbsp;·&nbsp; Finance Team &nbsp;·&nbsp; Built by Ashu Bhatt</p>
   </div>
-  <div class="hero-badge">v2.0 · Enhanced</div>
+  <div class="hero-badge">v3.0 · Smart Match</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -236,6 +236,17 @@ for _ps, _os_list in SIZE_EXPAND.items():
         ORDER_TO_PRICE_SIZE[_os.upper()].append(_ps)
 
 VENDOR_PREFIXES = ["GWN-","GWN_","GWN","SPF-","SPF_","SPF","KL_","KL-","KL"]
+
+# ── Normalisers ───────────────────────────────────────────────────────────────
+def _norm_cat(s: str) -> str:
+    """Normalise category: lowercase, collapse underscores/hyphens/dots → space."""
+    return re.sub(r"\s+", " ",
+                  str(s).lower().strip()
+                  .replace("_", " ").replace("-", " ").replace(".", " "))
+
+def _norm_sku(s: str) -> str:
+    """Strip everything except A-Z 0-9 and dash, uppercase."""
+    return re.sub(r"[^A-Z0-9\-]", "", str(s).upper().strip())
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SIDEBAR
@@ -321,45 +332,139 @@ def get_sku_base(sku: str) -> str:
     parts = key.rsplit("-", 1)
     return parts[0] if len(parts) == 2 else key
 
+def _extract_numeric_code(sku: str) -> str:
+    """Extract first numeric run ≥3 digits from SKU. e.g. 'YK1234-L' → '1234'."""
+    m = re.search(r"(\d{3,})", str(sku))
+    return m.group(1) if m else ""
+
+def _valid_sub_cat(ci: dict) -> bool:
+    sc = ci.get("sub_cat", "")
+    return bool(sc) and str(sc).strip().lower() not in ("", "nan")
+
+def _extract_numeric_code(sku: str) -> str:
+    """Extract leading numeric part from SKU, e.g. 'YK1234-L' → '1234'."""
+    m = re.search(r"(\d{3,})", sku)
+    return m.group(1) if m else ""
+
 def lookup_sub_cat(raw_sku: str, sku_info_dict: dict) -> tuple:
-    key_raw = raw_sku.strip().upper()
-    info = sku_info_dict.get(key_raw)
-    if info and info.get("sub_cat") and str(info["sub_cat"]).lower() != "nan":
-        return info["sub_cat"], "exact"
+    """
+    8-tier SKU → Sub-Category lookup (most-specific to most-fuzzy):
+      T1  Exact match on raw SKU
+      T2  Exact match after vendor-prefix strip
+      T3  Exact match after full normalisation (_norm_sku)
+      T4  Base SKU match (drop last dash-segment = size) on raw
+      T5  Base SKU match on stripped
+      T6  Normalised base match
+      T7  Numeric-code match (e.g. '1234' in 'YK1234-L' matches 'SPF-1234-M')
+      T8  Prefix match — SKU starts with same 6+ chars as a known SKU
+    """
+    if not raw_sku or str(raw_sku).strip().lower() in ("", "nan"):
+        return "", "not_found"
 
+    key_raw  = raw_sku.strip().upper()
     stripped = strip_vendor_prefix(raw_sku).strip().upper()
-    if stripped != key_raw:
-        info2 = sku_info_dict.get(stripped)
-        if info2 and info2.get("sub_cat") and str(info2["sub_cat"]).lower() != "nan":
-            return info2["sub_cat"], "exact-stripped"
+    norm_raw = _norm_sku(key_raw)
+    norm_str = _norm_sku(stripped)
 
-    base_raw = get_sku_base(key_raw)
+    # Pre-compute bases
+    base_raw  = get_sku_base(key_raw)
+    base_str  = get_sku_base(stripped)
+    base_norm = get_sku_base(norm_raw)
+
+    # Build normalised lookup index lazily (keyed on norm SKU)
+    # We iterate once and collect results per tier
+    t4_hits, t5_hits, t6_hits, t7_hits, t8_hits = [], [], [], [], []
+    num_code = _extract_numeric_code(key_raw)
+
     for csk, ci in sku_info_dict.items():
-        if get_sku_base(csk) == base_raw and ci.get("sub_cat") and str(ci["sub_cat"]).lower() != "nan":
-            return ci["sub_cat"], f"base({csk})"
+        if not _valid_sub_cat(ci):
+            continue
+        sc = ci["sub_cat"]
 
-    if stripped != key_raw:
-        base_str = get_sku_base(stripped)
-        for csk, ci in sku_info_dict.items():
-            if get_sku_base(csk) == base_str and ci.get("sub_cat") and str(ci["sub_cat"]).lower() != "nan":
-                return ci["sub_cat"], f"base-stripped({csk})"
+        # T1 – exact raw
+        if csk == key_raw:
+            return sc, "exact"
+
+        # T2 – exact stripped
+        if csk == stripped:
+            return sc, "exact-stripped"
+
+        # T3 – exact normalised
+        if _norm_sku(csk) == norm_raw or _norm_sku(csk) == norm_str:
+            return sc, "exact-norm"
+
+        # Collect for lower tiers
+        csk_base      = get_sku_base(csk)
+        csk_base_norm = get_sku_base(_norm_sku(csk))
+
+        if csk_base == base_raw:                       t4_hits.append((csk, sc))
+        elif csk_base == base_str:                     t5_hits.append((csk, sc))
+        elif csk_base_norm in (base_norm, get_sku_base(norm_str)):
+                                                       t6_hits.append((csk, sc))
+        if num_code and len(num_code) >= 3 and num_code in _norm_sku(csk):
+                                                       t7_hits.append((csk, sc))
+        if len(key_raw) >= 6 and csk.startswith(key_raw[:6]):
+                                                       t8_hits.append((csk, sc))
+
+    if t4_hits: return t4_hits[0][1], f"base({t4_hits[0][0]})"
+    if t5_hits: return t5_hits[0][1], f"base-strip({t5_hits[0][0]})"
+    if t6_hits: return t6_hits[0][1], f"base-norm({t6_hits[0][0]})"
+    if t7_hits: return t7_hits[0][1], f"num-code({t7_hits[0][0]})"
+    if t8_hits: return t8_hits[0][1], f"prefix({t8_hits[0][0]})"
 
     return "", "not_found"
 
 def lookup_pwn(sku: str, pwn_dict: dict) -> tuple:
+    """
+    6-tier PWN price lookup:
+      T1  Direct exact match
+      T2  Size-expand (L-XL slab → L or XL)
+      T3  Base SKU match (drop size suffix)
+      T4  Normalised SKU exact match
+      T5  Normalised base match
+      T6  Numeric-code match
+    """
     key = sku.strip().upper()
+
+    # T1: direct
     val = pwn_dict.get(key)
     if val is not None and pd.notna(val): return float(val), "direct"
+
+    # T2: size expand
     parts = key.rsplit("-", 1)
     if len(parts) == 2:
-        base, size = parts
-        for ps in ORDER_TO_PRICE_SIZE.get(size, []):
-            val = pwn_dict.get(f"{base}-{ps.upper()}")
+        base_k, size_k = parts
+        for ps in ORDER_TO_PRICE_SIZE.get(size_k, []):
+            val = pwn_dict.get(f"{base_k}-{ps.upper()}")
             if val is not None and pd.notna(val): return float(val), f"size-expand({ps})"
+
+    # T3: base match
     base = get_sku_base(key)
     if base:
         for csk, cv in pwn_dict.items():
-            if get_sku_base(csk) == base and pd.notna(cv): return float(cv), f"base-match({csk})"
+            if get_sku_base(csk) == base and pd.notna(cv):
+                return float(cv), f"base-match({csk})"
+
+    # T4: normalised exact
+    norm_key = _norm_sku(key)
+    for csk, cv in pwn_dict.items():
+        if _norm_sku(csk) == norm_key and pd.notna(cv):
+            return float(cv), f"norm-exact({csk})"
+
+    # T5: normalised base
+    norm_base = get_sku_base(norm_key)
+    if norm_base:
+        for csk, cv in pwn_dict.items():
+            if get_sku_base(_norm_sku(csk)) == norm_base and pd.notna(cv):
+                return float(cv), f"norm-base({csk})"
+
+    # T6: numeric-code match
+    num_code = _extract_numeric_code(key)
+    if num_code and len(num_code) >= 4:
+        for csk, cv in pwn_dict.items():
+            if num_code in _norm_sku(csk) and pd.notna(cv):
+                return float(cv), f"num-code({csk})"
+
     return np.nan, "not_found"
 
 def lookup_pwn_with_replace(sku, pwn_dict, replace_map):
@@ -386,15 +491,58 @@ def _build_brand_cat_index(charges_df_json: str):
     return idx
 
 def _filter_brand_cat(charges_df, brand, cat):
+    """
+    Match Brand + Category with normalisation:
+    - 'kids_nightwear' == 'Kids Nightwear' == 'kids-nightwear'
+    - Falls back to partial/token match if exact normalised match fails
+    """
     if not brand or not cat: return pd.DataFrame()
     if "Brand Name" not in charges_df.columns or "Category" not in charges_df.columns:
         return pd.DataFrame()
     bn = str(brand).strip().lower()
-    cn = str(cat).strip().lower()
-    if bn == "nan" or cn == "nan": return pd.DataFrame()
+    if bn == "nan": return pd.DataFrame()
+
+    cat_norm = _norm_cat(cat)
+    if not cat_norm or cat_norm == "nan": return pd.DataFrame()
+
     bm = charges_df["Brand Name"].fillna("").astype(str).str.strip().str.lower() == bn
-    cm = charges_df["Category"].fillna("").astype(str).str.strip().str.lower() == cn
-    return charges_df[bm & cm].copy()
+    brand_rows = charges_df[bm].copy()
+    if brand_rows.empty: return pd.DataFrame()
+
+    # Normalise the Category column once
+    brand_rows["_cat_norm"] = brand_rows["Category"].fillna("").astype(str).apply(_norm_cat)
+
+    # T1: exact normalised match
+    exact = brand_rows[brand_rows["_cat_norm"] == cat_norm]
+    if not exact.empty:
+        return exact.drop(columns=["_cat_norm"])
+
+    # T2: one side is a substring of the other (handles 'salwar kurta' vs 'salwar kurta dupatta')
+    sub = brand_rows[
+        brand_rows["_cat_norm"].apply(lambda x: x in cat_norm or cat_norm in x)
+    ]
+    if not sub.empty:
+        return sub.drop(columns=["_cat_norm"])
+
+    # T2b: no-space exact match — catches "nightsuit" vs "night suit"
+    cat_nospace = cat_norm.replace(" ", "")
+    sub2 = brand_rows[brand_rows["_cat_norm"].apply(lambda x: x.replace(" ","") == cat_nospace)]
+    if not sub2.empty:
+        return sub2.drop(columns=["_cat_norm"])
+
+    # T3: token overlap ≥ 50% — e.g. "night suit" vs "nightsuit" (no space)
+    cat_tokens = set(cat_norm.split())
+    def token_overlap(x):
+        x_tokens = set(x.split())
+        if not x_tokens or not cat_tokens: return 0
+        return len(cat_tokens & x_tokens) / max(len(cat_tokens), len(x_tokens))
+
+    brand_rows["_overlap"] = brand_rows["_cat_norm"].apply(token_overlap)
+    tok = brand_rows[brand_rows["_overlap"] >= 0.5].sort_values("_overlap", ascending=False)
+    if not tok.empty:
+        return tok.drop(columns=["_cat_norm","_overlap"])
+
+    return pd.DataFrame()
 
 def lookup_gt(brand, cat, inv_amount, charges_df):
     for _, r in _filter_brand_cat(charges_df, brand, cat).iterrows():
@@ -1020,16 +1168,20 @@ if order_files and charges_file:
     with st.expander("🔍 Brand & Sub-Category Detection — first 20 rows", expanded=False):
         sample = order_df[["SKU","Product"]].head(20).copy()
         sample["Brand (from Product)"] = sample["Product"].apply(extract_brand_from_product)
-        sample["Sub-Category"] = sample["SKU"].apply(lambda s: lookup_sub_cat(s, sku_info_dict)[0])
+        sample["Sub-Category (found)"] = sample["SKU"].apply(lambda s: lookup_sub_cat(s, sku_info_dict)[0])
+        sample["Cat Match Tier"]       = sample["SKU"].apply(lambda s: lookup_sub_cat(s, sku_info_dict)[1])
+        sample["Cat Norm"]             = sample["Sub-Category (found)"].apply(_norm_cat)
         sample["Charge Rows"] = sample.apply(
-            lambda r: len(_filter_brand_cat(charges_df, r["Brand (from Product)"], r["Sub-Category"])), axis=1
+            lambda r: len(_filter_brand_cat(charges_df, r["Brand (from Product)"], r["Sub-Category (found)"])), axis=1
         )
         sample["Ready"] = sample["Charge Rows"].apply(lambda x: "✅" if x > 0 else "❌")
         st.dataframe(sample, use_container_width=True)
-        cats = sorted(charges_df["Category"].dropna().unique().tolist()) if "Category" in charges_df.columns else []
+
+        cats_sheet0 = sorted(charges_df["Category"].dropna().unique().tolist()) if "Category" in charges_df.columns else []
+        cats_norm   = [f"{c}  →  `{_norm_cat(c)}`" for c in cats_sheet0]
         col_a, col_b = st.columns(2)
-        col_a.markdown(f"**Brands in Sheet 0:** {', '.join(known_brands)}")
-        col_b.markdown(f"**Categories in Sheet 0:** {', '.join(cats)}")
+        col_a.markdown(f"**Brands in Sheet 0:** `{'`, `'.join(known_brands)}`")
+        col_b.markdown("**Categories in Sheet 0 (raw → normalised):**\n\n" + "\n\n".join(cats_norm))
 
     with st.expander("📊 Sheet Structure Preview", expanded=False):
         t0, t1, t2 = st.tabs(["Sheet 0 · Charges", "Sheet 1 · SKU→Category", "Sheet 2 · PWN Prices"])
