@@ -30,17 +30,68 @@ html, body, [class*="css"] { font-family: 'Plus Jakarta Sans', sans-serif; }
 .stApp { background: #f5f7fa; }
 .block-container { padding: 1.4rem 2rem 2rem; max-width: 1600px; }
 
-/* ── Sidebar ── */
+/* ── Sidebar background ── */
 [data-testid="stSidebar"] {
     background: linear-gradient(180deg, #0f2139 0%, #1a3c5e 100%);
     border-right: 2px solid #2563a8;
 }
-[data-testid="stSidebar"] * { color: #e8f0f9 !important; }
+
+/* Sidebar plain text & markdown */
+[data-testid="stSidebar"] p,
+[data-testid="stSidebar"] li,
+[data-testid="stSidebar"] span:not([data-testid]),
+[data-testid="stSidebar"] .stMarkdown p,
+[data-testid="stSidebar"] .stMarkdown li,
+[data-testid="stSidebar"] [data-testid="stCaption"] {
+    color: #e8f0f9 !important;
+}
+
+/* Sidebar headings */
+[data-testid="stSidebar"] h1,
+[data-testid="stSidebar"] h2,
+[data-testid="stSidebar"] h3,
 [data-testid="stSidebar"] .stMarkdown h1,
 [data-testid="stSidebar"] .stMarkdown h2,
 [data-testid="stSidebar"] .stMarkdown h3 { color: #ffd700 !important; }
+
+/* Sidebar widget labels */
+[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] .stFileUploader label,
+[data-testid="stSidebar"] .stNumberInput label {
+    color: #93c5fd !important;
+    font-size: 0.82rem !important;
+    font-weight: 600 !important;
+}
+
+/* File uploader box — keep white background so drag text is readable */
+[data-testid="stSidebar"] [data-testid="stFileUploader"] section {
+    background: #ffffff !important;
+    border: 1.5px dashed #93c5fd !important;
+    border-radius: 8px !important;
+}
+[data-testid="stSidebar"] [data-testid="stFileUploader"] section * {
+    color: #0f2139 !important;
+}
+[data-testid="stSidebar"] [data-testid="stFileUploader"] section button {
+    background: #1d4ed8 !important;
+    color: #ffffff !important;
+    border: none !important;
+    border-radius: 6px !important;
+}
+
+/* Number inputs — white box with dark text */
+[data-testid="stSidebar"] input[type="number"] {
+    background: #ffffff !important;
+    color: #0f2139 !important;
+    border: 1px solid #93c5fd !important;
+    border-radius: 6px !important;
+}
+
+/* HR divider */
 [data-testid="stSidebar"] hr { border-color: #2563a8; }
-[data-testid="stSidebar"] label { color: #93c5fd !important; font-size: 0.8rem !important; }
+
+/* Success / info messages inside sidebar */
+[data-testid="stSidebar"] .stAlert { color: #0f2139 !important; }
 
 /* ── Metric cards ── */
 [data-testid="stMetric"] {
