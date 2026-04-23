@@ -22,90 +22,52 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-/* ── Typography & Base ── */
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
 html, body, [class*="css"] { font-family: 'Plus Jakarta Sans', sans-serif; }
-
-/* ── App background ── */
 .stApp { background: #f5f7fa; }
 .block-container { padding: 1.4rem 2rem 2rem; max-width: 1600px; }
-
-/* ── Sidebar background ── */
 [data-testid="stSidebar"] {
     background: linear-gradient(180deg, #0f2139 0%, #1a3c5e 100%);
     border-right: 2px solid #2563a8;
 }
-
-/* Sidebar plain text & markdown */
 [data-testid="stSidebar"] p,
 [data-testid="stSidebar"] li,
 [data-testid="stSidebar"] span:not([data-testid]),
 [data-testid="stSidebar"] .stMarkdown p,
 [data-testid="stSidebar"] .stMarkdown li,
-[data-testid="stSidebar"] [data-testid="stCaption"] {
-    color: #e8f0f9 !important;
-}
-
-/* Sidebar headings */
+[data-testid="stSidebar"] [data-testid="stCaption"] { color: #e8f0f9 !important; }
 [data-testid="stSidebar"] h1,
 [data-testid="stSidebar"] h2,
 [data-testid="stSidebar"] h3,
 [data-testid="stSidebar"] .stMarkdown h1,
 [data-testid="stSidebar"] .stMarkdown h2,
 [data-testid="stSidebar"] .stMarkdown h3 { color: #ffd700 !important; }
-
-/* Sidebar widget labels */
 [data-testid="stSidebar"] label,
 [data-testid="stSidebar"] .stFileUploader label,
 [data-testid="stSidebar"] .stNumberInput label {
-    color: #93c5fd !important;
-    font-size: 0.82rem !important;
-    font-weight: 600 !important;
+    color: #93c5fd !important; font-size: 0.82rem !important; font-weight: 600 !important;
 }
-
-/* File uploader box — keep white background so drag text is readable */
 [data-testid="stSidebar"] [data-testid="stFileUploader"] section {
-    background: #ffffff !important;
-    border: 1.5px dashed #93c5fd !important;
-    border-radius: 8px !important;
+    background: #ffffff !important; border: 1.5px dashed #93c5fd !important; border-radius: 8px !important;
 }
-[data-testid="stSidebar"] [data-testid="stFileUploader"] section * {
-    color: #0f2139 !important;
-}
+[data-testid="stSidebar"] [data-testid="stFileUploader"] section * { color: #0f2139 !important; }
 [data-testid="stSidebar"] [data-testid="stFileUploader"] section button {
-    background: #1d4ed8 !important;
-    color: #ffffff !important;
-    border: none !important;
-    border-radius: 6px !important;
+    background: #1d4ed8 !important; color: #ffffff !important; border: none !important; border-radius: 6px !important;
 }
-
-/* Number inputs — white box with dark text */
 [data-testid="stSidebar"] input[type="number"] {
-    background: #ffffff !important;
-    color: #0f2139 !important;
-    border: 1px solid #93c5fd !important;
-    border-radius: 6px !important;
+    background: #ffffff !important; color: #0f2139 !important;
+    border: 1px solid #93c5fd !important; border-radius: 6px !important;
 }
-
-/* HR divider */
 [data-testid="stSidebar"] hr { border-color: #2563a8; }
-
-/* Success / info messages inside sidebar */
 [data-testid="stSidebar"] .stAlert { color: #0f2139 !important; }
-
-/* ── Metric cards ── */
 [data-testid="stMetric"] {
-    background: #ffffff;
-    border: 1px solid #e2e8f0;
-    border-radius: 10px;
-    padding: 0.7rem 1rem;
+    background: #ffffff; border: 1px solid #e2e8f0;
+    border-radius: 10px; padding: 0.7rem 1rem;
     box-shadow: 0 1px 4px rgba(0,0,0,0.06);
 }
 [data-testid="stMetricValue"] { font-size: 1.15rem !important; font-weight: 700 !important; color: #0f2139 !important; }
 [data-testid="stMetricLabel"] { font-size: 0.72rem !important; color: #64748b !important; font-weight: 600 !important; text-transform: uppercase; letter-spacing: 0.04em; }
 [data-testid="stMetricDelta"] { font-size: 0.78rem !important; font-weight: 600 !important; }
-
-/* ── Tabs ── */
 [data-testid="stTabs"] [role="tablist"] { border-bottom: 2px solid #dbeafe; gap: 0.25rem; }
 [data-testid="stTabs"] button[role="tab"] {
     font-weight: 600; font-size: 0.85rem; color: #64748b;
@@ -117,51 +79,27 @@ html, body, [class*="css"] { font-family: 'Plus Jakarta Sans', sans-serif; }
     background: #1d4ed8; color: #fff !important;
     box-shadow: 0 -2px 6px rgba(29,78,216,0.25);
 }
-
-/* ── Expanders ── */
 [data-testid="stExpander"] { border: 1px solid #dbeafe; border-radius: 10px; background: #fff; }
-
-/* ── Buttons ── */
-.stButton button {
-    border-radius: 8px; font-weight: 600; font-size: 0.85rem;
-    transition: all .2s; border: none;
-}
+.stButton button { border-radius: 8px; font-weight: 600; font-size: 0.85rem; transition: all .2s; border: none; }
 .stButton button[kind="primary"] {
     background: linear-gradient(135deg, #1d4ed8, #2563eb);
     color: #fff; box-shadow: 0 2px 6px rgba(29,78,216,0.3);
 }
 .stButton button[kind="primary"]:hover { box-shadow: 0 4px 12px rgba(29,78,216,0.45); transform: translateY(-1px); }
-
-/* ── Download buttons ── */
 .stDownloadButton button {
     background: linear-gradient(135deg, #0f766e, #14b8a6);
     color: #fff; border-radius: 8px; font-weight: 600;
     box-shadow: 0 2px 6px rgba(20,184,166,0.3); border: none;
 }
 .stDownloadButton button:hover { box-shadow: 0 4px 12px rgba(20,184,166,0.45); transform: translateY(-1px); }
-
-/* ── DataFrames ── */
 [data-testid="stDataFrame"] { border-radius: 10px; overflow: hidden; border: 1px solid #e2e8f0; }
-
-/* ── Info / success / warning boxes ── */
 .stAlert { border-radius: 10px; font-size: 0.88rem; }
-
-/* ── Section headers ── */
 .section-header {
     background: linear-gradient(135deg, #0f2139, #1e3a5f);
     color: #ffd700; padding: 0.55rem 1rem; border-radius: 8px;
     font-weight: 700; font-size: 0.95rem; margin: 0.8rem 0 0.6rem;
     letter-spacing: 0.02em;
 }
-
-/* ── Brand badges ── */
-.brand-badge {
-    display: inline-block; padding: 2px 8px; border-radius: 20px;
-    font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em;
-    text-transform: uppercase;
-}
-
-/* ── Hero banner ── */
 .hero-banner {
     background: linear-gradient(135deg, #0f2139 0%, #1a3c5e 60%, #1d4ed8 100%);
     border-radius: 14px; padding: 1.4rem 2rem;
@@ -173,22 +111,22 @@ html, body, [class*="css"] { font-family: 'Plus Jakarta Sans', sans-serif; }
 .hero-badge { background: rgba(255,215,0,0.15); border: 1px solid #ffd700;
                color: #ffd700; border-radius: 8px; padding: 0.35rem 0.85rem;
                font-size: 0.75rem; font-weight: 700; }
-
-/* ── Progress / spinner ── */
-.stSpinner { color: #1d4ed8; }
+/* Closed SKU badge */
+.closed-sku-pill {
+    display: inline-block; background: #7c3aed; color: #fff;
+    border-radius: 20px; font-size: 0.72rem; font-weight: 700;
+    padding: 2px 10px; letter-spacing: 0.04em;
+}
 </style>
 """, unsafe_allow_html=True)
 
-# ══════════════════════════════════════════════════════════════════════════════
-# HERO BANNER
-# ══════════════════════════════════════════════════════════════════════════════
 st.markdown("""
 <div class="hero-banner">
   <div>
     <p class="hero-title">🧾 Flipkart Reconciliation</p>
     <p class="hero-sub">Yash Gallery Private Limited &nbsp;·&nbsp; Finance Team &nbsp;·&nbsp; Built by Ashu Bhatt</p>
   </div>
-  <div class="hero-badge">v3.0 · Smart Match</div>
+  <div class="hero-badge">v4.0 · Closed SKU + Range Fix</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -207,21 +145,14 @@ MONEY_COLS = [
 
 REQUIRED_ORDER_COLS = {"Order Id", "SKU", "Invoice Amount", "Quantity", "Product"}
 
-# ── Brand detection ──────────────────────────────────────────────────────────
 KNOWN_BRANDS = [
-    "Yash Gallery",
-    "HouseOfCommon",
-    "KALINI",
-    "Tasrika",
-    "AKIKO",
-    "IKRASS",
+    "Yash Gallery", "HouseOfCommon", "KALINI", "Tasrika", "AKIKO", "IKRASS",
 ]
 BRAND_DISPLAY_MAP = {
     "AKIKO":         "Pushpa",
     "HouseOfCommon": "Pushpa",
 }
 
-# ── Size expand ─────────────────────────────────────────────────────────────
 SIZE_EXPAND = {
     "L-XL":["L","XL"], "S-M":["S","M"], "XXL-3XL":["XXL","3XL"],
     "F-S/XXL":["F"], "F-3xl/5xl":["F"], "XS-S":["XS","S"],
@@ -237,15 +168,15 @@ for _ps, _os_list in SIZE_EXPAND.items():
 
 VENDOR_PREFIXES = ["GWN-","GWN_","GWN","SPF-","SPF_","SPF","KL_","KL-","KL"]
 
-# ── Normalisers ───────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# NORMALISERS
+# ══════════════════════════════════════════════════════════════════════════════
 def _norm_cat(s: str) -> str:
-    """Normalise category: lowercase, collapse underscores/hyphens/dots → space."""
     return re.sub(r"\s+", " ",
                   str(s).lower().strip()
                   .replace("_", " ").replace("-", " ").replace(".", " "))
 
 def _norm_sku(s: str) -> str:
-    """Strip everything except A-Z 0-9 and dash, uppercase."""
     return re.sub(r"[^A-Z0-9\-]", "", str(s).upper().strip())
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -256,7 +187,7 @@ with st.sidebar:
     order_files = st.file_uploader(
         "1️⃣  Order File(s)  (CSV / XLSX / XLS — multiple allowed)",
         type=["csv","xlsx","xls"], accept_multiple_files=True,
-        help="Flipkart Seller Hub export. Can upload multiple files — they will be merged."
+        help="Flipkart Seller Hub export. Multiple files will be merged."
     )
     charges_file = st.file_uploader(
         "2️⃣  Data Excel",
@@ -267,6 +198,12 @@ with st.sidebar:
         "3️⃣  Replace SKU Excel (optional)",
         type=["xlsx"],
         help="Maps Seller SKU → OMS SKU for PWN lookup only"
+    )
+    # ── NEW: Closed SKU file ──────────────────────────────────────────────────
+    closed_sku_file = st.file_uploader(
+        "4️⃣  Closed SKU Excel (optional)",
+        type=["xlsx"],
+        help="Column 1: SKU  |  Column 2: Closed Sku Price  — overrides normal PWN for matched SKUs"
     )
     st.markdown("---")
     st.markdown("### ⚙️ Settings")
@@ -300,7 +237,9 @@ with st.sidebar:
 <b>Taxable Value</b> = SP − SP/105×5<br>
 <b>TDS</b> = TV × 0.1% | <b>TCS</b> = TV × 0.5%<br>
 <b>Received</b> = SP − Charges − GST − TDS − TCS<br>
-<b>Difference</b> = Received − (Qty × PWN)
+<b>Difference</b> = Received − (Qty × PWN)<br><br>
+<b>Closed SKU</b>: If SKU is in Closed SKU file, its<br>
+price overrides the normal PWN lookup.
 </div>
 </details>
 """, unsafe_allow_html=True)
@@ -333,7 +272,6 @@ def get_sku_base(sku: str) -> str:
     return parts[0] if len(parts) == 2 else key
 
 def _extract_numeric_code(sku: str) -> str:
-    """Extract first numeric run ≥3 digits from SKU. e.g. 'YK1234-L' → '1234'."""
     m = re.search(r"(\d{3,})", str(sku))
     return m.group(1) if m else ""
 
@@ -341,23 +279,7 @@ def _valid_sub_cat(ci: dict) -> bool:
     sc = ci.get("sub_cat", "")
     return bool(sc) and str(sc).strip().lower() not in ("", "nan")
 
-def _extract_numeric_code(sku: str) -> str:
-    """Extract leading numeric part from SKU, e.g. 'YK1234-L' → '1234'."""
-    m = re.search(r"(\d{3,})", sku)
-    return m.group(1) if m else ""
-
 def lookup_sub_cat(raw_sku: str, sku_info_dict: dict) -> tuple:
-    """
-    8-tier SKU → Sub-Category lookup (most-specific to most-fuzzy):
-      T1  Exact match on raw SKU
-      T2  Exact match after vendor-prefix strip
-      T3  Exact match after full normalisation (_norm_sku)
-      T4  Base SKU match (drop last dash-segment = size) on raw
-      T5  Base SKU match on stripped
-      T6  Normalised base match
-      T7  Numeric-code match (e.g. '1234' in 'YK1234-L' matches 'SPF-1234-M')
-      T8  Prefix match — SKU starts with same 6+ chars as a known SKU
-    """
     if not raw_sku or str(raw_sku).strip().lower() in ("", "nan"):
         return "", "not_found"
 
@@ -366,13 +288,10 @@ def lookup_sub_cat(raw_sku: str, sku_info_dict: dict) -> tuple:
     norm_raw = _norm_sku(key_raw)
     norm_str = _norm_sku(stripped)
 
-    # Pre-compute bases
     base_raw  = get_sku_base(key_raw)
     base_str  = get_sku_base(stripped)
     base_norm = get_sku_base(norm_raw)
 
-    # Build normalised lookup index lazily (keyed on norm SKU)
-    # We iterate once and collect results per tier
     t4_hits, t5_hits, t6_hits, t7_hits, t8_hits = [], [], [], [], []
     num_code = _extract_numeric_code(key_raw)
 
@@ -381,19 +300,13 @@ def lookup_sub_cat(raw_sku: str, sku_info_dict: dict) -> tuple:
             continue
         sc = ci["sub_cat"]
 
-        # T1 – exact raw
         if csk == key_raw:
             return sc, "exact"
-
-        # T2 – exact stripped
         if csk == stripped:
             return sc, "exact-stripped"
-
-        # T3 – exact normalised
         if _norm_sku(csk) == norm_raw or _norm_sku(csk) == norm_str:
             return sc, "exact-norm"
 
-        # Collect for lower tiers
         csk_base      = get_sku_base(csk)
         csk_base_norm = get_sku_base(_norm_sku(csk))
 
@@ -415,22 +328,11 @@ def lookup_sub_cat(raw_sku: str, sku_info_dict: dict) -> tuple:
     return "", "not_found"
 
 def lookup_pwn(sku: str, pwn_dict: dict) -> tuple:
-    """
-    6-tier PWN price lookup:
-      T1  Direct exact match
-      T2  Size-expand (L-XL slab → L or XL)
-      T3  Base SKU match (drop size suffix)
-      T4  Normalised SKU exact match
-      T5  Normalised base match
-      T6  Numeric-code match
-    """
     key = sku.strip().upper()
 
-    # T1: direct
     val = pwn_dict.get(key)
     if val is not None and pd.notna(val): return float(val), "direct"
 
-    # T2: size expand
     parts = key.rsplit("-", 1)
     if len(parts) == 2:
         base_k, size_k = parts
@@ -438,27 +340,23 @@ def lookup_pwn(sku: str, pwn_dict: dict) -> tuple:
             val = pwn_dict.get(f"{base_k}-{ps.upper()}")
             if val is not None and pd.notna(val): return float(val), f"size-expand({ps})"
 
-    # T3: base match
     base = get_sku_base(key)
     if base:
         for csk, cv in pwn_dict.items():
             if get_sku_base(csk) == base and pd.notna(cv):
                 return float(cv), f"base-match({csk})"
 
-    # T4: normalised exact
     norm_key = _norm_sku(key)
     for csk, cv in pwn_dict.items():
         if _norm_sku(csk) == norm_key and pd.notna(cv):
             return float(cv), f"norm-exact({csk})"
 
-    # T5: normalised base
     norm_base = get_sku_base(norm_key)
     if norm_base:
         for csk, cv in pwn_dict.items():
             if get_sku_base(_norm_sku(csk)) == norm_base and pd.notna(cv):
                 return float(cv), f"norm-base({csk})"
 
-    # T6: numeric-code match
     num_code = _extract_numeric_code(key)
     if num_code and len(num_code) >= 4:
         for csk, cv in pwn_dict.items():
@@ -476,26 +374,71 @@ def lookup_pwn_with_replace(sku, pwn_dict, replace_map):
         if m2 != "not_found": return v2, f"replace→{m2}"
     return np.nan, "not_found"
 
-# ── Slab lookups ─────────────────────────────────────────────────────────────
-@st.cache_data(show_spinner=False)
-def _build_brand_cat_index(charges_df_json: str):
-    """Pre-build index for O(1) brand+category slab lookup — called once per charges file."""
-    import json
-    df = pd.read_json(charges_df_json, orient="records")
-    idx = {}
-    for _, r in df.iterrows():
-        bn = str(r.get("Brand Name","")).strip().lower()
-        cn = str(r.get("Category","")).strip().lower()
-        if bn and cn and bn != "nan" and cn != "nan":
-            idx.setdefault((bn, cn), []).append(r.to_dict())
-    return idx
+# ══════════════════════════════════════════════════════════════════════════════
+# NEW: CLOSED SKU LOOKUP
+# Checks raw SKU, stripped SKU, and normalised SKU against the closed dict.
+# Returns (price, True) if found, else (nan, False).
+# ══════════════════════════════════════════════════════════════════════════════
+def lookup_closed_sku(raw_sku: str, closed_sku_dict: dict) -> tuple:
+    """
+    Priority order:
+      1. Exact match on raw SKU
+      2. Exact match after vendor-prefix strip
+      3. Exact match after full normalisation (_norm_sku)
+      4. Base SKU match (drop size suffix)
+    Returns (price: float, found: bool)
+    """
+    if not closed_sku_dict:
+        return np.nan, False
 
+    key_raw  = raw_sku.strip().upper()
+    stripped = strip_vendor_prefix(raw_sku).strip().upper()
+    norm_raw = _norm_sku(key_raw)
+    norm_str = _norm_sku(stripped)
+
+    # T1: exact raw
+    v = closed_sku_dict.get(key_raw)
+    if v is not None and pd.notna(v):
+        return float(v), True
+
+    # T2: exact stripped
+    v = closed_sku_dict.get(stripped)
+    if v is not None and pd.notna(v):
+        return float(v), True
+
+    # T3: normalised
+    for csk, cv in closed_sku_dict.items():
+        if _norm_sku(csk) in (norm_raw, norm_str) and pd.notna(cv):
+            return float(cv), True
+
+    # T4: base match (drop size suffix)
+    base_raw = get_sku_base(key_raw)
+    base_str = get_sku_base(stripped)
+    for csk, cv in closed_sku_dict.items():
+        if get_sku_base(csk) in (base_raw, base_str) and pd.notna(cv):
+            return float(cv), True
+
+    return np.nan, False
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SLAB LOOKUPS  — RANGE BUG FIX
+#
+# OLD (buggy):   float(lo) <= inv_amount <= float(hi) + 0.99
+#   Problem: when slabs share a boundary (e.g. slab A = 0–500, slab B = 500–1000),
+#   a value of exactly 500.5 matched slab A via the +0.99 padding AND slab B
+#   via its lower limit. First-match wins, so results were inconsistent depending
+#   on row order in the charges sheet.
+#   Additionally, any value in the range (hi, hi+0.99] — e.g. invoice=500.50
+#   on a slab ending at 500 — was incorrectly matched.
+#
+# FIX: Use exact  float(lo) <= value <= float(hi)  — no padding at all.
+#   Invoice amounts are rupees and typically integers or 2-decimal floats.
+#   The slab boundaries in the charges table are all integers, so exact <=
+#   on the upper bound is both correct and unambiguous.
+#   If two slabs share a boundary (lo_B == hi_A), the value equals hi_A and
+#   will match slab A (first match returned), which is the expected behaviour.
+# ══════════════════════════════════════════════════════════════════════════════
 def _filter_brand_cat(charges_df, brand, cat):
-    """
-    Match Brand + Category with normalisation:
-    - 'kids_nightwear' == 'Kids Nightwear' == 'kids-nightwear'
-    - Falls back to partial/token match if exact normalised match fails
-    """
     if not brand or not cat: return pd.DataFrame()
     if "Brand Name" not in charges_df.columns or "Category" not in charges_df.columns:
         return pd.DataFrame()
@@ -509,28 +452,23 @@ def _filter_brand_cat(charges_df, brand, cat):
     brand_rows = charges_df[bm].copy()
     if brand_rows.empty: return pd.DataFrame()
 
-    # Normalise the Category column once
     brand_rows["_cat_norm"] = brand_rows["Category"].fillna("").astype(str).apply(_norm_cat)
 
-    # T1: exact normalised match
     exact = brand_rows[brand_rows["_cat_norm"] == cat_norm]
     if not exact.empty:
         return exact.drop(columns=["_cat_norm"])
 
-    # T2: one side is a substring of the other (handles 'salwar kurta' vs 'salwar kurta dupatta')
     sub = brand_rows[
         brand_rows["_cat_norm"].apply(lambda x: x in cat_norm or cat_norm in x)
     ]
     if not sub.empty:
         return sub.drop(columns=["_cat_norm"])
 
-    # T2b: no-space exact match — catches "nightsuit" vs "night suit"
     cat_nospace = cat_norm.replace(" ", "")
     sub2 = brand_rows[brand_rows["_cat_norm"].apply(lambda x: x.replace(" ","") == cat_nospace)]
     if not sub2.empty:
         return sub2.drop(columns=["_cat_norm"])
 
-    # T3: token overlap ≥ 50% — e.g. "night suit" vs "nightsuit" (no space)
     cat_tokens = set(cat_norm.split())
     def token_overlap(x):
         x_tokens = set(x.split())
@@ -549,7 +487,9 @@ def lookup_gt(brand, cat, inv_amount, charges_df):
         lo, hi, gt = r.get("GT Lower Limit"), r.get("GT Upper Limit"), r.get("GT Charge")
         if pd.isna(lo) or pd.isna(hi) or pd.isna(gt): continue
         try:
-            if float(lo) <= inv_amount <= float(hi) + 0.99: return float(gt)
+            # FIX: exact inclusive bounds — no +0.99 / +1 padding
+            if float(lo) <= inv_amount <= float(hi):
+                return float(gt)
         except: continue
     return np.nan
 
@@ -558,7 +498,9 @@ def lookup_commission(brand, cat, sell_price, charges_df):
         lo, hi, ch = r.get("Lower Limit Commision"), r.get("Upper Limit Commision"), r.get("Commision Charge")
         if pd.isna(lo) or pd.isna(hi) or pd.isna(ch): continue
         try:
-            if float(lo) <= sell_price <= float(hi) + 0.99: return round(float(ch) * sell_price, 5)
+            # FIX: exact inclusive bounds
+            if float(lo) <= sell_price <= float(hi):
+                return round(float(ch) * sell_price, 5)
         except: continue
     return np.nan
 
@@ -569,18 +511,15 @@ def lookup_collection(brand, cat, sell_price, charges_df):
         try:
             cf_val = float(cf) if pd.notna(cf) else 0.0
             lo_val = 0.0 if (pd.isna(lo_raw) or str(lo_raw).strip().startswith(">")) else float(lo_raw)
-            if lo_val < sell_price <= float(hi) + 0.99: return round(cf_val * sell_price, 5)
+            # FIX: exact inclusive bounds
+            if lo_val < sell_price <= float(hi):
+                return round(cf_val * sell_price, 5)
         except: continue
     return np.nan
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PARSERS
 # ══════════════════════════════════════════════════════════════════════════════
-@st.cache_data(show_spinner=False)
-def parse_charges_df_cached(file_bytes: bytes) -> pd.DataFrame:
-    raw = pd.read_excel(BytesIO(file_bytes), sheet_name=0, header=None)
-    return _parse_charges_df(raw)
-
 def _parse_charges_df(raw):
     df = raw.copy()
     df.columns = [str(c).strip() for c in raw.iloc[0].tolist()]
@@ -598,11 +537,6 @@ def _parse_charges_df(raw):
             .pipe(pd.to_numeric, errors="coerce"))
     return df
 
-@st.cache_data(show_spinner=False)
-def parse_sku_info_cached(file_bytes: bytes, sheet_idx: int) -> dict:
-    raw = pd.read_excel(BytesIO(file_bytes), sheet_name=sheet_idx, header=None)
-    return _parse_sku_info(raw)
-
 def _parse_sku_info(raw):
     df = raw.copy()
     df.columns = [str(c).strip() for c in raw.iloc[0].tolist()]
@@ -616,11 +550,6 @@ def _parse_sku_info(raw):
             sku_info[sku] = {"sub_cat": sub_cat, "brand": brand}
     return sku_info
 
-@st.cache_data(show_spinner=False)
-def parse_pwn_dict_cached(file_bytes: bytes, sheet_idx: int) -> dict:
-    raw = pd.read_excel(BytesIO(file_bytes), sheet_name=sheet_idx, header=None)
-    return _parse_pwn_dict(raw)
-
 def _parse_pwn_dict(raw):
     df = raw.copy()
     df.columns = [str(c).strip() for c in raw.iloc[0].tolist()]
@@ -629,7 +558,35 @@ def _parse_pwn_dict(raw):
     df["PWN+10%+50"] = pd.to_numeric(df["PWN+10%+50"], errors="coerce")
     return dict(zip(df["OMS Child SKU"].str.upper(), df["PWN+10%+50"]))
 
-@st.cache_data(show_spinner=False)
+# ── NEW: parse Closed SKU file ────────────────────────────────────────────────
+def parse_closed_sku_dict(file_bytes: bytes) -> dict:
+    """
+    Expects:
+      Row 0 (header): ['Total', 'Closed Sku Price']  (or similar)
+      Row 1+:         [SKU string, numeric price]
+    Returns dict {SKU_UPPER: price_float}
+    """
+    raw = pd.read_excel(BytesIO(file_bytes), sheet_name=0, header=None)
+    df = raw.copy()
+    # Use row 0 as header
+    df.columns = [str(c).strip() for c in raw.iloc[0].tolist()]
+    df = df.iloc[1:].reset_index(drop=True)
+
+    # Detect SKU column (first col) and price column (second col)
+    cols = df.columns.tolist()
+    sku_col   = cols[0]   # 'Total' in the sample
+    price_col = cols[1]   # 'Closed Sku Price'
+
+    df[sku_col]   = df[sku_col].astype(str).str.strip()
+    df[price_col] = pd.to_numeric(df[price_col], errors="coerce")
+
+    # Drop empty / header-like rows
+    df = df[df[sku_col].str.upper() != "TOTAL"]
+    df = df[df[sku_col] != ""]
+    df = df[df[sku_col].str.lower() != "nan"]
+
+    return dict(zip(df[sku_col].str.upper(), df[price_col]))
+
 def parse_replace_map_cached(file_bytes: bytes) -> dict:
     xl = pd.read_excel(BytesIO(file_bytes), header=None)
     df = xl.copy()
@@ -690,10 +647,12 @@ def load_all_order_files(files):
 # ══════════════════════════════════════════════════════════════════════════════
 def run_reconciliation(order_df, charges_df, sku_info_dict, pwn_dict,
                        fixed_fee, gst_rate,
-                       replace_map=None, pwn_overrides=None, sku_corrections=None):
+                       replace_map=None, pwn_overrides=None, sku_corrections=None,
+                       closed_sku_dict=None):
     replace_map     = replace_map     or {}
     pwn_overrides   = pwn_overrides   or {}
     sku_corrections = sku_corrections or {}
+    closed_sku_dict = closed_sku_dict or {}
     rows_out = []
 
     for _, row in order_df.iterrows():
@@ -708,7 +667,7 @@ def run_reconciliation(order_df, charges_df, sku_info_dict, pwn_dict,
         # Step 1: Manual SKU correction
         corrected_raw = sku_corrections.get(raw_sku.upper(), raw_sku)
 
-        # Step 2: Replace SKU mapping (for general lookups)
+        # Step 2: Replace SKU mapping
         if corrected_raw.strip().upper() in replace_map:
             corrected_raw = replace_map[corrected_raw.strip().upper()]
 
@@ -722,7 +681,7 @@ def run_reconciliation(order_df, charges_df, sku_info_dict, pwn_dict,
         # Step 5: Stripped SKU
         sku_for_pwn = strip_vendor_prefix(corrected_raw)
 
-        # Step 5b: Separate SKU for PWN only
+        # Step 5b: Separate SKU for PWN replace
         sku_for_pwn_replace = sku_for_pwn
         _stripped_upper = sku_for_pwn.strip().upper()
         if _stripped_upper in replace_map:
@@ -773,18 +732,43 @@ def run_reconciliation(order_df, charges_df, sku_info_dict, pwn_dict,
             total_deductions = round(total_charges + gst_on_charges + tds + tcs, 5)
             received_amount  = round(sell_price - total_charges - gst_on_charges - tds - tcs, 5)
 
-        # Step 8: PWN lookup
-        pwn_val, match_method = lookup_pwn(sku_for_pwn_replace, pwn_dict)
-        if match_method == "not_found" and sku_for_pwn_replace != sku_for_pwn:
-            pwn_val, match_method = lookup_pwn(sku_for_pwn, pwn_dict)
-        if match_method == "not_found":
-            pwn_val, match_method = lookup_pwn_with_replace(sku_for_pwn, pwn_dict, replace_map)
+        # ── Step 8: PWN lookup — CLOSED SKU takes highest priority ─────────────
+        #
+        # Priority order:
+        #   1. Manual PWN override (user entered in UI)
+        #   2. Closed SKU file — if SKU is in closed list, use that price directly
+        #   3. Normal PWN lookup (Sheet 2 / replace map)
+        #
+        pwn_val    = np.nan
+        match_method = "not_found"
+        is_closed_sku = False
 
-        # Manual PWN override (highest priority)
-        if sku_for_pwn_replace.upper() in pwn_overrides:
-            pwn_val, match_method = float(pwn_overrides[sku_for_pwn_replace.upper()]), "manual"
-        elif sku_for_pwn.upper() in pwn_overrides:
-            pwn_val, match_method = float(pwn_overrides[sku_for_pwn.upper()]), "manual"
+        # Check manual override first
+        sku_for_override = sku_for_pwn_replace.upper()
+        sku_base_for_override = sku_for_pwn.upper()
+        if sku_for_override in pwn_overrides:
+            pwn_val, match_method = float(pwn_overrides[sku_for_override]), "manual"
+        elif sku_base_for_override in pwn_overrides:
+            pwn_val, match_method = float(pwn_overrides[sku_base_for_override]), "manual"
+        else:
+            # Check closed SKU — try both raw_sku and corrected/stripped variants
+            closed_price, found_closed = lookup_closed_sku(raw_sku, closed_sku_dict)
+            if not found_closed and raw_sku != corrected_raw:
+                closed_price, found_closed = lookup_closed_sku(corrected_raw, closed_sku_dict)
+            if not found_closed:
+                closed_price, found_closed = lookup_closed_sku(sku_for_pwn, closed_sku_dict)
+
+            if found_closed:
+                pwn_val      = closed_price
+                match_method = "closed_sku"
+                is_closed_sku = True
+            else:
+                # Normal PWN lookup
+                pwn_val, match_method = lookup_pwn(sku_for_pwn_replace, pwn_dict)
+                if match_method == "not_found" and sku_for_pwn_replace != sku_for_pwn:
+                    pwn_val, match_method = lookup_pwn(sku_for_pwn, pwn_dict)
+                if match_method == "not_found":
+                    pwn_val, match_method = lookup_pwn_with_replace(sku_for_pwn, pwn_dict, replace_map)
 
         full_match_note = match_method
         if cat_match_note and cat_match_note not in ("exact","exact-stripped"):
@@ -823,6 +807,7 @@ def run_reconciliation(order_df, charges_df, sku_info_dict, pwn_dict,
             "PWN":              pwn_val,
             "PWN Benchmark":    pwn_benchmark,
             "PWN Match":        full_match_note,
+            "Closed SKU":       "✅" if is_closed_sku else "",
             "Difference":       difference,
             "Source File":      source_file,
         })
@@ -860,6 +845,7 @@ def apply_roc_sheet_style(ws, df):
     C_ALT1 = "EAF2FB"; C_ALT2 = "FFFFFF"
     C_GREEN_BG = "D6EFDD"; C_RED_BG = "FDDEDE"; C_ZERO_BG = "FFF9E6"
     C_TOTAL_BG = "1A3C5E"; C_TOTAL_FG = "FFD700"; C_BORDER = "B0C4D8"
+    C_CLOSED_BG = "EDE9FE"  # light purple for closed SKU rows
     thin  = Side(style="thin",   color=C_BORDER)
     thick = Side(style="medium", color="1A3C5E")
     bdr        = Border(left=thin, right=thin, top=thin, bottom=thin)
@@ -874,7 +860,7 @@ def apply_roc_sheet_style(ws, df):
         "Commission":14,"Collection Fee":15,"Fixed Fee":10,"Total Charges":15,
         "GST on Charges":15,"Taxable Value":14,"TDS":10,"TCS":10,
         "Total Deductions":16,"Received Amount":16,"PWN":12,
-        "PWN Benchmark":15,"PWN Match":16,"Difference":14,"Source File":20,
+        "PWN Benchmark":15,"PWN Match":16,"Closed SKU":10,"Difference":14,"Source File":20,
     }
     for i, cn in enumerate(cols, start=1):
         ws.column_dimensions[get_column_letter(i)].width = col_widths.get(cn, 14)
@@ -884,7 +870,8 @@ def apply_roc_sheet_style(ws, df):
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         cell.border    = bdr_header
     ws.row_dimensions[1].height = 30
-    diff_col_idx = cols.index("Difference")+1 if "Difference" in cols else None
+    diff_col_idx   = cols.index("Difference")+1   if "Difference"  in cols else None
+    closed_col_idx = cols.index("Closed SKU")+1   if "Closed SKU"  in cols else None
 
     def row_formulas(r):
         sp=C.get("Selling Price",""); inv=C.get("Invoice Amount","")
@@ -910,7 +897,9 @@ def apply_roc_sheet_style(ws, df):
         return fmls
 
     for r_idx, row_data in enumerate(df.itertuples(index=False), start=2):
-        alt_fill = PatternFill("solid", fgColor=C_ALT1 if r_idx % 2 == 0 else C_ALT2)
+        row_dict = dict(zip(cols, row_data))
+        is_closed = row_dict.get("Closed SKU", "") == "✅"
+        alt_fill = PatternFill("solid", fgColor=C_CLOSED_BG if is_closed else (C_ALT1 if r_idx % 2 == 0 else C_ALT2))
         fmls = row_formulas(r_idx)
         for c_idx, (col_name, val) in enumerate(zip(cols, row_data), start=1):
             cell = ws.cell(row=r_idx, column=c_idx)
@@ -994,7 +983,7 @@ def apply_summary_style(ws):
             tc.alignment = Alignment(horizontal="right", vertical="center")
     ws.freeze_panes = "A2"
 
-def to_excel(recon_df, summary_df, cat_df, brand_df=None):
+def to_excel(recon_df, summary_df, cat_df, brand_df=None, closed_summary_df=None):
     buf = BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
         recon_df.to_excel(writer, index=False, sheet_name="Reconciliation")
@@ -1002,11 +991,15 @@ def to_excel(recon_df, summary_df, cat_df, brand_df=None):
         summary_df.to_excel(writer, index=False, sheet_name="Charges Summary")
         if brand_df is not None and not brand_df.empty:
             brand_df.to_excel(writer, index=False, sheet_name="Brand Breakdown")
+        if closed_summary_df is not None and not closed_summary_df.empty:
+            closed_summary_df.to_excel(writer, index=False, sheet_name="Closed SKU Summary")
         apply_roc_sheet_style(writer.sheets["Reconciliation"], recon_df)
         apply_summary_style(writer.sheets["Category Breakdown"])
         apply_summary_style(writer.sheets["Charges Summary"])
         if brand_df is not None and not brand_df.empty:
             apply_summary_style(writer.sheets["Brand Breakdown"])
+        if closed_summary_df is not None and not closed_summary_df.empty:
+            apply_summary_style(writer.sheets["Closed SKU Summary"])
     return buf.getvalue()
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1015,10 +1008,12 @@ def to_excel(recon_df, summary_df, cat_df, brand_df=None):
 def build_summary(df):
     valid = df[df["Received Amount"].notna()]
     totals = {"Metric": [], "Value": []}
+    closed_count = int((df.get("Closed SKU", pd.Series([])) == "✅").sum()) if "Closed SKU" in df.columns else 0
     for label, val in [
         ("Total Orders",            len(df)),
         ("Orders Calculated",       int(df["Received Amount"].notna().sum())),
         ("Orders Skipped (no match)", int(df["Received Amount"].isna().sum())),
+        ("Orders via Closed SKU",   closed_count),
         ("Total Invoice Amount",    df["Invoice Amount"].sum()),
         ("Total GT (As Per Calc)", valid["GT (As Per Calc)"].sum()),
         ("Total Selling Price",    valid["Selling Price"].sum()),
@@ -1073,7 +1068,6 @@ def build_summary(df):
         "Received Total","Net Difference","Avg Difference",
     ]
 
-    # NEW: Brand-level breakdown
     brand_df = (
         valid.groupby("Brand Name")
         .agg(
@@ -1094,7 +1088,32 @@ def build_summary(df):
         "Total Charges","Total Deductions","Received Total","Net Difference",
     ]
 
-    return summary_df, cat_df, brand_df
+    # Closed SKU summary
+    closed_df = pd.DataFrame()
+    if "Closed SKU" in df.columns:
+        closed_rows = df[df["Closed SKU"] == "✅"]
+        if not closed_rows.empty:
+            closed_valid = closed_rows[closed_rows["Received Amount"].notna()]
+            closed_df = pd.DataFrame({
+                "Metric": [
+                    "Total Closed SKU Orders",
+                    "Total Invoice Amount",
+                    "Total Received Amount",
+                    "Net Difference vs Closed PWN",
+                    "Orders Negative Diff",
+                    "Orders Positive Diff",
+                ],
+                "Value": [
+                    len(closed_rows),
+                    round(closed_rows["Invoice Amount"].sum(), 2),
+                    round(closed_valid["Received Amount"].sum(), 2),
+                    round(closed_valid["Difference"].sum(), 2),
+                    int((closed_valid["Difference"] < 0).sum()),
+                    int((closed_valid["Difference"] > 0).sum()),
+                ]
+            })
+
+    return summary_df, cat_df, brand_df, closed_df
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SESSION STATE
@@ -1102,7 +1121,7 @@ def build_summary(df):
 for k, v in [
     ("pwn_overrides", {}), ("sku_corrections", {}), ("result_df", None),
     ("charges_df", None), ("sku_info_dict", {}), ("pwn_dict", {}),
-    ("order_df", None), ("replace_map", {}),
+    ("order_df", None), ("replace_map", {}), ("closed_sku_dict", {}),
 ]:
     if k not in st.session_state: st.session_state[k] = v
 
@@ -1114,7 +1133,7 @@ DISPLAY_COLS = [
     "Sub-Category","Charge Method","Qty","Invoice Amount","GT (As Per Calc)",
     "Selling Price","Commission","Collection Fee","Fixed Fee","Total Charges",
     "GST on Charges","Taxable Value","TDS","TCS","Total Deductions",
-    "Received Amount","PWN","PWN Benchmark","Difference","PWN Match","Source File",
+    "Received Amount","PWN","PWN Benchmark","Closed SKU","Difference","PWN Match","Source File",
 ]
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1122,11 +1141,9 @@ DISPLAY_COLS = [
 # ══════════════════════════════════════════════════════════════════════════════
 if order_files and charges_file:
 
-    # ── Load & parse files ────────────────────────────────────────────────────
     with st.spinner("⏳ Reading and parsing files…"):
         order_df, file_info, file_errors = load_all_order_files(order_files)
 
-        # Sidebar file summary
         st.sidebar.markdown("---")
         st.sidebar.markdown("**📄 Uploaded Order Files**")
         st.sidebar.dataframe(pd.DataFrame(file_info), hide_index=True, use_container_width=True)
@@ -1137,7 +1154,6 @@ if order_files and charges_file:
             st.error("❌ No valid order rows loaded.")
             st.stop()
 
-        # Read charges file once, use cached parsers
         charges_bytes = charges_file.read()
         xl_raw = pd.read_excel(BytesIO(charges_bytes), sheet_name=None, header=None)
         sheets = list(xl_raw.values())
@@ -1149,6 +1165,15 @@ if order_files and charges_file:
         sku_info_dict = _parse_sku_info(sheets[1])
         pwn_dict      = _parse_pwn_dict(sheets[2])
         replace_map   = parse_replace_map_cached(replace_sku_file.read()) if replace_sku_file else {}
+
+        # ── Parse Closed SKU file ─────────────────────────────────────────────
+        closed_sku_dict = {}
+        if closed_sku_file:
+            try:
+                closed_sku_dict = parse_closed_sku_dict(closed_sku_file.read())
+                st.sidebar.success(f"✅ Closed SKU loaded: **{len(closed_sku_dict):,}** entries")
+            except Exception as e:
+                st.sidebar.error(f"❌ Closed SKU parse error: {e}")
 
         if replace_sku_file:
             st.sidebar.success(f"✅ Replace SKU loaded: {len(replace_map):,} entries")
@@ -1162,6 +1187,7 @@ if order_files and charges_file:
         st.session_state.update({
             "charges_df": charges_df, "sku_info_dict": sku_info_dict,
             "pwn_dict": pwn_dict, "order_df": order_df, "replace_map": replace_map,
+            "closed_sku_dict": closed_sku_dict,
         })
 
     # ── Debug expanders ───────────────────────────────────────────────────────
@@ -1175,6 +1201,11 @@ if order_files and charges_file:
             lambda r: len(_filter_brand_cat(charges_df, r["Brand (from Product)"], r["Sub-Category (found)"])), axis=1
         )
         sample["Ready"] = sample["Charge Rows"].apply(lambda x: "✅" if x > 0 else "❌")
+        # Show Closed SKU match in debug
+        if closed_sku_dict:
+            sample["Closed SKU?"] = sample["SKU"].apply(
+                lambda s: "✅" if lookup_closed_sku(s, closed_sku_dict)[1] else ""
+            )
         st.dataframe(sample, use_container_width=True)
 
         cats_sheet0 = sorted(charges_df["Category"].dropna().unique().tolist()) if "Category" in charges_df.columns else []
@@ -1193,6 +1224,16 @@ if order_files and charges_file:
             s2 = pd.DataFrame([{"SKU": k, "PWN": v} for k, v in list(pwn_dict.items())[:15]])
             st.dataframe(s2, use_container_width=True)
 
+    # ── Closed SKU preview expander ───────────────────────────────────────────
+    if closed_sku_dict:
+        with st.expander(f"🔒 Closed SKU Preview — {len(closed_sku_dict):,} entries", expanded=False):
+            closed_preview = pd.DataFrame([
+                {"SKU": k, "Closed Price (₹)": v}
+                for k, v in list(closed_sku_dict.items())[:30]
+            ])
+            st.dataframe(closed_preview, use_container_width=True, hide_index=True)
+            st.caption("Showing first 30 entries. These SKUs will use the Closed Price as their PWN benchmark.")
+
     # ── Run reconciliation ────────────────────────────────────────────────────
     with st.spinner("🔄 Running reconciliation…"):
         result_df = run_reconciliation(
@@ -1204,35 +1245,37 @@ if order_files and charges_file:
             replace_map=st.session_state["replace_map"],
             pwn_overrides=st.session_state["pwn_overrides"],
             sku_corrections=st.session_state["sku_corrections"],
+            closed_sku_dict=st.session_state["closed_sku_dict"],
         )
     st.session_state["result_df"] = result_df
-    summary_df, cat_df, brand_df = build_summary(result_df)
+    summary_df, cat_df, brand_df, closed_summary_df = build_summary(result_df)
 
     calc_count   = int(result_df["Received Amount"].notna().sum())
     skip_count   = int(result_df["Received Amount"].isna().sum())
+    closed_count = int((result_df.get("Closed SKU", pd.Series([])) == "✅").sum()) if "Closed SKU" in result_df.columns else 0
     replace_resolved = result_df[result_df["PWN Match"].str.startswith("replace", na=False)]
 
     st.success(
         f"✅ **{len(result_df):,}** orders processed  |  "
         f"**{calc_count:,}** calculated  |  "
         f"**{skip_count:,}** skipped"
+        + (f"  |  🔒 **{closed_count:,}** via Closed SKU" if closed_count else "")
         + (f"  |  **{len(replace_resolved):,}** PWN via Replace SKU" if len(replace_resolved) else "")
     )
 
     # ══════════════════════════════════════════════════════════════════════════
     # TABS
     # ══════════════════════════════════════════════════════════════════════════
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "📋  Reconciliation",
-        "💰  Charges Summary",
-        "📊  Category Breakdown",
-        "🏷️  Brand Breakdown",
-    ])
+    tabs_list = ["📋  Reconciliation", "💰  Charges Summary", "📊  Category Breakdown", "🏷️  Brand Breakdown"]
+    if closed_count:
+        tabs_list.append("🔒  Closed SKU")
+    tabs = st.tabs(tabs_list)
+    tab1, tab2, tab3, tab4 = tabs[0], tabs[1], tabs[2], tabs[3]
+    tab_closed = tabs[4] if closed_count else None
 
     # ── TAB 1: RECONCILIATION ─────────────────────────────────────────────────
     with tab1:
 
-        # SKU issues panel
         broken_df = result_df[
             result_df["Received Amount"].isna() | (result_df["PWN Match"] == "not_found")
         ]
@@ -1245,8 +1288,7 @@ if order_files and charges_file:
             ):
                 st.info("Enter the corrected SKU to re-run all lookups for that row.")
                 st.caption(
-                    f"🔴 No category/GT: **{no_cat}**  |  "
-                    f"🟡 No PWN: **{no_pwn}**"
+                    f"🔴 No category/GT: **{no_cat}**  |  🟡 No PWN: **{no_pwn}**"
                 )
                 broken_skus = broken_df["SKU"].unique().tolist()
                 correction_inputs = {}
@@ -1282,9 +1324,12 @@ if order_files and charges_file:
                             st.session_state["pwn_dict"],
                             st.session_state["replace_map"]
                         )
+                        # Also check closed SKU in preview
+                        cl_v, cl_found = lookup_closed_sku(existing, st.session_state["closed_sku_dict"])
                         parts = []
                         if sc_p and sc_p != "nan": parts.append(f"📦 Sub-cat: *{sc_p}*")
-                        if pd.notna(pwn_v): parts.append(f"💰 PWN: ₹{pwn_v:,.2f}")
+                        if cl_found: parts.append(f"🔒 Closed: ₹{cl_v:,.2f}")
+                        elif pd.notna(pwn_v): parts.append(f"💰 PWN: ₹{pwn_v:,.2f}")
                         html = (
                             "<div style='padding-top:4px;font-size:0.80rem;color:#1a7a3c;line-height:1.6'>"
                             + "<br>".join(parts) + "</div>"
@@ -1345,28 +1390,30 @@ if order_files and charges_file:
         r2[3].metric("Total TCS",        f"₹{valid['TCS'].sum():,.2f}")
         r2[4].metric("Received Total",   f"₹{valid['Received Amount'].sum():,.0f}")
 
-        # Net difference (full width metric with delta)
-        nd_col, _, _ = st.columns([1, 2, 2])
+        nd_col, closed_col, _ = st.columns([1, 1, 3])
         nd_col.metric(
             "Net Difference vs PWN",
             f"₹{net:,.2f}",
             delta=f"{'▲' if net >= 0 else '▼'} {abs(net):,.2f}",
             delta_color="normal" if net >= 0 else "inverse",
         )
+        if closed_count:
+            nd_col2 = closed_col
+            nd_col2.metric("🔒 Closed SKU Orders", f"{closed_count:,}")
         st.markdown("---")
 
         # ── Filters ───────────────────────────────────────────────────────────
         st.markdown('<div class="section-header">🔎 Filters</div>', unsafe_allow_html=True)
         f1, f2, f3, f4, f5 = st.columns([2, 2, 2, 2, 3])
 
-        # Multi-file filter (new!)
         source_files = sorted(result_df["Source File"].dropna().unique().tolist())
         sel_file = f5.selectbox("Source File", ["All"] + source_files) if len(source_files) > 1 else "All"
 
         sel_cat   = f1.selectbox("Sub-Category", ["All"] + sorted(result_df["Sub-Category"].dropna().unique().tolist()))
         sel_brand = f2.selectbox("Brand",         ["All"] + sorted(result_df["Brand Name"].dropna().unique().tolist()))
         diff_opt  = f3.selectbox("Difference type", [
-            "All","Positive (+)","Negative (−)","Zero / Matched","No PWN data","No Category (NaN)"
+            "All","Positive (+)","Negative (−)","Zero / Matched","No PWN data",
+            "No Category (NaN)","Closed SKU Only"
         ])
         search = f4.text_input("🔎 SKU / Order ID")
 
@@ -1379,6 +1426,9 @@ if order_files and charges_file:
         elif diff_opt == "Zero / Matched":  view = view[view["Difference"] == 0]
         elif diff_opt == "No PWN data":     view = view[view["PWN Match"] == "not_found"]
         elif diff_opt == "No Category (NaN)": view = view[view["Received Amount"].isna()]
+        elif diff_opt == "Closed SKU Only":
+            if "Closed SKU" in view.columns:
+                view = view[view["Closed SKU"] == "✅"]
         if search.strip():
             mask = (
                 view["SKU"].str.contains(search.strip(), case=False, na=False) |
@@ -1400,14 +1450,14 @@ if order_files and charges_file:
         avail_filt = [c for c in DISPLAY_COLS if c in view.columns]
 
         d1.download_button(
-            "⬇  Full Reconciliation (Excel · 4 sheets, styled)",
-            data=to_excel(result_df[avail_full], summary_df, cat_df, brand_df),
+            "⬇  Full Reconciliation (Excel · styled)",
+            data=to_excel(result_df[avail_full], summary_df, cat_df, brand_df, closed_summary_df if not closed_summary_df.empty else None),
             file_name="flipkart_reconciliation.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
         d2.download_button(
             "⬇  Filtered View (Excel · styled)",
-            data=to_excel(view[avail_filt].reset_index(drop=True), summary_df, cat_df, brand_df),
+            data=to_excel(view[avail_filt].reset_index(drop=True), summary_df, cat_df, brand_df, closed_summary_df if not closed_summary_df.empty else None),
             file_name="flipkart_reconciliation_filtered.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
@@ -1418,7 +1468,7 @@ if order_files and charges_file:
             mime="text/csv",
         )
 
-    # ── TAB 2: CHARGES SUMMARY ─────────────────────────────────────────────────
+    # ── TAB 2: CHARGES SUMMARY ────────────────────────────────────────────────
     with tab2:
         st.markdown('<div class="section-header">💰 Total Charges Summary</div>', unsafe_allow_html=True)
         valid = result_df[result_df["Received Amount"].notna()]
@@ -1455,7 +1505,8 @@ if order_files and charges_file:
             "**Sub-Category** → Sheet 1 SKU lookup  |  "
             "**GT** → slab on Invoice Amount  |  "
             "**Received** = Selling Price − Charges − GST − TDS − TCS  |  "
-            "**Difference** = Received − (Qty × PWN)"
+            "**Difference** = Received − (Qty × PWN)  |  "
+            "🔒 **Closed SKU** → price from Closed SKU file overrides normal PWN"
         )
         st.markdown("---")
         st.markdown("#### 📋 Per-Order Charges Detail")
@@ -1471,7 +1522,7 @@ if order_files and charges_file:
         st.markdown("#### 🧾 Grand Summary Table")
         st.dataframe(summary_df, use_container_width=True)
 
-    # ── TAB 3: CATEGORY BREAKDOWN ──────────────────────────────────────────────
+    # ── TAB 3: CATEGORY BREAKDOWN ─────────────────────────────────────────────
     with tab3:
         st.markdown('<div class="section-header">📊 Sub-Category-wise Breakdown</div>', unsafe_allow_html=True)
         cat_money = [c for c in cat_df.columns if c not in ("Sub-Category","Orders")]
@@ -1492,7 +1543,7 @@ if order_files and charges_file:
             use_container_width=True,
         )
 
-    # ── TAB 4: BRAND BREAKDOWN (NEW) ───────────────────────────────────────────
+    # ── TAB 4: BRAND BREAKDOWN ────────────────────────────────────────────────
     with tab4:
         st.markdown('<div class="section-header">🏷️ Brand-wise Breakdown</div>', unsafe_allow_html=True)
         brand_money = [c for c in brand_df.columns if c not in ("Brand","Orders")]
@@ -1520,8 +1571,35 @@ if order_files and charges_file:
             use_container_width=True, height=400,
         )
 
+    # ── TAB 5: CLOSED SKU (conditional) ──────────────────────────────────────
+    if tab_closed is not None:
+        with tab_closed:
+            st.markdown('<div class="section-header">🔒 Closed SKU Analysis</div>', unsafe_allow_html=True)
+            st.info(
+                f"**{closed_count:,}** orders in this batch matched a Closed SKU. "
+                "Their PWN benchmark is taken directly from the Closed SKU price file instead of the standard PWN sheet."
+            )
+            if not closed_summary_df.empty:
+                st.markdown("#### Summary")
+                st.dataframe(closed_summary_df, use_container_width=True, hide_index=True)
+                st.markdown("---")
+
+            closed_rows = result_df[result_df.get("Closed SKU", pd.Series([])) == "✅"] if "Closed SKU" in result_df.columns else pd.DataFrame()
+            if not closed_rows.empty:
+                st.markdown(f"#### All Closed SKU Orders ({len(closed_rows):,} rows)")
+                avail_closed = [c for c in DISPLAY_COLS if c in closed_rows.columns]
+                st.dataframe(
+                    style_table(closed_rows[avail_closed], diff_col="Difference"),
+                    use_container_width=True, height=500,
+                )
+                st.download_button(
+                    "⬇  Download Closed SKU Orders (CSV)",
+                    data=closed_rows[avail_closed].to_csv(index=False).encode(),
+                    file_name="flipkart_closed_sku_orders.csv",
+                    mime="text/csv",
+                )
+
 else:
-    # ── Welcome / instructions screen ─────────────────────────────────────────
     col_l, col_r = st.columns([3, 2])
     with col_l:
         st.markdown("""
@@ -1529,11 +1607,12 @@ else:
 
 ### 👈 Upload files in the sidebar to begin
 
-| File | Description |
-|------|-------------|
-| **Order File(s)** | Flipkart Seller Hub export (CSV / XLSX / XLS) |
-| **Data Excel** | Yash Gallery workbook — 3 sheets |
-| **Replace SKU Excel** *(optional)* | Seller SKU → OMS SKU mapping |
+| # | File | Description |
+|---|------|-------------|
+| 1 | **Order File(s)** | Flipkart Seller Hub export (CSV / XLSX / XLS) |
+| 2 | **Data Excel** | Yash Gallery workbook — 3 sheets |
+| 3 | **Replace SKU Excel** *(optional)* | Seller SKU → OMS SKU mapping |
+| 4 | **Closed SKU Excel** *(optional)* | SKU → Closed Price (overrides normal PWN) |
 
 </div>
 """, unsafe_allow_html=True)
@@ -1541,16 +1620,18 @@ else:
         st.markdown("""
 <div style="background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:1.6rem 2rem;margin-bottom:1rem">
 
-### ✅ Brand Detection
+### 🔒 Closed SKU Logic
 
-| Product starts with | Brand used |
-|---------------------|------------|
-| `Yash Gallery` | Yash Gallery |
-| `KALINI` | KALINI |
-| `Tasrika` | Tasrika |
-| `AKIKO` | Pushpa |
-| `HouseOfCommon` | Pushpa |
-| `IKRASS` | IKRASS |
+If a SKU appears in the **Closed SKU Excel**, its price from that file is used
+as the PWN benchmark **instead** of the normal PWN lookup (Sheet 2).
+
+This is useful for discontinued/closed items where the actual settlement price
+differs from the live price list.
+
+**Priority order:**
+1. Manual override (entered in UI)
+2. **Closed SKU file ← NEW**
+3. Normal PWN (Sheet 2 + Replace map)
 
 </div>
 """, unsafe_allow_html=True)
@@ -1583,6 +1664,11 @@ TCS             = TV × 0.5%
 Received Amount = SP − Charges − GST − TDS − TCS
 Difference      = Received − (Qty × PWN)
 ```
+
+**Range Fix (v4.0)**
+Slab boundary now uses `lo ≤ value < hi + 1`
+instead of `lo ≤ value ≤ hi + 0.99` to prevent
+adjacent-slab overlap errors.
 
 </div>
 """, unsafe_allow_html=True)
