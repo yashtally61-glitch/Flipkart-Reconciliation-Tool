@@ -126,7 +126,7 @@ st.markdown("""
     <p class="hero-title">🧾 Flipkart Reconciliation</p>
     <p class="hero-sub">Yash Gallery Private Limited &nbsp;·&nbsp; Finance Team &nbsp;·&nbsp; Built by Ashu Bhatt</p>
   </div>
-  <div class="hero-badge">v4.0 · Closed SKU + Range Fix</div>
+  <div class="hero-badge">v4.1 · Invoice-Amount Slab for Commission & Collection</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -199,7 +199,6 @@ with st.sidebar:
         type=["xlsx"],
         help="Maps Seller SKU → OMS SKU for PWN lookup only"
     )
-    # ── NEW: Closed SKU file ──────────────────────────────────────────────────
     closed_sku_file = st.file_uploader(
         "4️⃣  Closed SKU Excel (optional)",
         type=["xlsx"],
@@ -234,6 +233,8 @@ with st.sidebar:
 <div style="font-size:0.78rem;margin-top:6px;line-height:1.7">
 <b>GT</b> → slab on Invoice Amount<br>
 <b>Selling Price</b> = Invoice − GT<br>
+<b>Commission %</b> → slab picked by Invoice Amount, applied on Selling Price<br>
+<b>Collection %</b> → slab picked by Invoice Amount, applied on Selling Price<br>
 <b>Taxable Value</b> = SP − SP/105×5<br>
 <b>TDS</b> = TV × 0.1% | <b>TCS</b> = TV × 0.5%<br>
 <b>Received</b> = SP − Charges − GST − TDS − TCS<br>
@@ -374,20 +375,7 @@ def lookup_pwn_with_replace(sku, pwn_dict, replace_map):
         if m2 != "not_found": return v2, f"replace→{m2}"
     return np.nan, "not_found"
 
-# ══════════════════════════════════════════════════════════════════════════════
-# NEW: CLOSED SKU LOOKUP
-# Checks raw SKU, stripped SKU, and normalised SKU against the closed dict.
-# Returns (price, True) if found, else (nan, False).
-# ══════════════════════════════════════════════════════════════════════════════
 def lookup_closed_sku(raw_sku: str, closed_sku_dict: dict) -> tuple:
-    """
-    Priority order:
-      1. Exact match on raw SKU
-      2. Exact match after vendor-prefix strip
-      3. Exact match after full normalisation (_norm_sku)
-      4. Base SKU match (drop size suffix)
-    Returns (price: float, found: bool)
-    """
     if not closed_sku_dict:
         return np.nan, False
 
@@ -396,22 +384,18 @@ def lookup_closed_sku(raw_sku: str, closed_sku_dict: dict) -> tuple:
     norm_raw = _norm_sku(key_raw)
     norm_str = _norm_sku(stripped)
 
-    # T1: exact raw
     v = closed_sku_dict.get(key_raw)
     if v is not None and pd.notna(v):
         return float(v), True
 
-    # T2: exact stripped
     v = closed_sku_dict.get(stripped)
     if v is not None and pd.notna(v):
         return float(v), True
 
-    # T3: normalised
     for csk, cv in closed_sku_dict.items():
         if _norm_sku(csk) in (norm_raw, norm_str) and pd.notna(cv):
             return float(cv), True
 
-    # T4: base match (drop size suffix)
     base_raw = get_sku_base(key_raw)
     base_str = get_sku_base(stripped)
     for csk, cv in closed_sku_dict.items():
@@ -421,22 +405,7 @@ def lookup_closed_sku(raw_sku: str, closed_sku_dict: dict) -> tuple:
     return np.nan, False
 
 # ══════════════════════════════════════════════════════════════════════════════
-# SLAB LOOKUPS  — RANGE BUG FIX
-#
-# OLD (buggy):   float(lo) <= inv_amount <= float(hi) + 0.99
-#   Problem: when slabs share a boundary (e.g. slab A = 0–500, slab B = 500–1000),
-#   a value of exactly 500.5 matched slab A via the +0.99 padding AND slab B
-#   via its lower limit. First-match wins, so results were inconsistent depending
-#   on row order in the charges sheet.
-#   Additionally, any value in the range (hi, hi+0.99] — e.g. invoice=500.50
-#   on a slab ending at 500 — was incorrectly matched.
-#
-# FIX: Use exact  float(lo) <= value <= float(hi)  — no padding at all.
-#   Invoice amounts are rupees and typically integers or 2-decimal floats.
-#   The slab boundaries in the charges table are all integers, so exact <=
-#   on the upper bound is both correct and unambiguous.
-#   If two slabs share a boundary (lo_B == hi_A), the value equals hi_A and
-#   will match slab A (first match returned), which is the expected behaviour.
+# SLAB LOOKUPS
 # ══════════════════════════════════════════════════════════════════════════════
 def _filter_brand_cat(charges_df, brand, cat):
     if not brand or not cat: return pd.DataFrame()
@@ -487,33 +456,38 @@ def lookup_gt(brand, cat, inv_amount, charges_df):
         lo, hi, gt = r.get("GT Lower Limit"), r.get("GT Upper Limit"), r.get("GT Charge")
         if pd.isna(lo) or pd.isna(hi) or pd.isna(gt): continue
         try:
-            # FIX: exact inclusive bounds — no +0.99 / +1 padding
             if float(lo) <= inv_amount <= float(hi):
                 return float(gt)
         except: continue
     return np.nan
 
-def lookup_commission(brand, cat, sell_price, charges_df):
+def lookup_commission(brand, cat, inv_amount, sell_price, charges_df):
+    """
+    Slab selection  → based on Invoice Amount  (which slab row to pick)
+    Rate applied on → Selling Price            (what amount to multiply)
+    """
     for _, r in _filter_brand_cat(charges_df, brand, cat).iterrows():
         lo, hi, ch = r.get("Lower Limit Commision"), r.get("Upper Limit Commision"), r.get("Commision Charge")
         if pd.isna(lo) or pd.isna(hi) or pd.isna(ch): continue
         try:
-            # FIX: exact inclusive bounds
-            if float(lo) <= sell_price <= float(hi):
-                return round(float(ch) * sell_price, 5)
+            if float(lo) <= inv_amount <= float(hi):          # slab selected by Invoice Amount
+                return round(float(ch) * sell_price, 5)       # rate applied on Selling Price
         except: continue
     return np.nan
 
-def lookup_collection(brand, cat, sell_price, charges_df):
+def lookup_collection(brand, cat, inv_amount, sell_price, charges_df):
+    """
+    Slab selection  → based on Invoice Amount  (which slab row to pick)
+    Rate applied on → Selling Price            (what amount to multiply)
+    """
     for _, r in _filter_brand_cat(charges_df, brand, cat).iterrows():
         lo_raw, hi, cf = r.get("Collection Lower Limit"), r.get("Collection Upper Limit"), r.get("Collection Charge")
         if pd.isna(hi) or pd.isna(cf): continue
         try:
             cf_val = float(cf) if pd.notna(cf) else 0.0
             lo_val = 0.0 if (pd.isna(lo_raw) or str(lo_raw).strip().startswith(">")) else float(lo_raw)
-            # FIX: exact inclusive bounds
-            if lo_val < sell_price <= float(hi):
-                return round(cf_val * sell_price, 5)
+            if lo_val < inv_amount <= float(hi):               # slab selected by Invoice Amount
+                return round(cf_val * sell_price, 5)           # rate applied on Selling Price
         except: continue
     return np.nan
 
@@ -558,33 +532,19 @@ def _parse_pwn_dict(raw):
     df["PWN+10%+50"] = pd.to_numeric(df["PWN+10%+50"], errors="coerce")
     return dict(zip(df["OMS Child SKU"].str.upper(), df["PWN+10%+50"]))
 
-# ── NEW: parse Closed SKU file ────────────────────────────────────────────────
 def parse_closed_sku_dict(file_bytes: bytes) -> dict:
-    """
-    Expects:
-      Row 0 (header): ['Total', 'Closed Sku Price']  (or similar)
-      Row 1+:         [SKU string, numeric price]
-    Returns dict {SKU_UPPER: price_float}
-    """
     raw = pd.read_excel(BytesIO(file_bytes), sheet_name=0, header=None)
     df = raw.copy()
-    # Use row 0 as header
     df.columns = [str(c).strip() for c in raw.iloc[0].tolist()]
     df = df.iloc[1:].reset_index(drop=True)
-
-    # Detect SKU column (first col) and price column (second col)
     cols = df.columns.tolist()
-    sku_col   = cols[0]   # 'Total' in the sample
-    price_col = cols[1]   # 'Closed Sku Price'
-
+    sku_col   = cols[0]
+    price_col = cols[1]
     df[sku_col]   = df[sku_col].astype(str).str.strip()
     df[price_col] = pd.to_numeric(df[price_col], errors="coerce")
-
-    # Drop empty / header-like rows
     df = df[df[sku_col].str.upper() != "TOTAL"]
     df = df[df[sku_col] != ""]
     df = df[df[sku_col].str.lower() != "nan"]
-
     return dict(zip(df[sku_col].str.upper(), df[price_col]))
 
 def parse_replace_map_cached(file_bytes: bytes) -> dict:
@@ -695,7 +655,10 @@ def run_reconciliation(order_df, charges_df, sku_info_dict, pwn_dict,
                 if _raw_upper in replace_map:
                     sku_for_pwn_replace = replace_map[_raw_upper]
 
-        # Step 6: Slab lookups
+        # ── Step 6: Slab lookups ──────────────────────────────────────────────
+        # GT        → slab picked by Invoice Amount
+        # Commission → slab picked by Invoice Amount, rate applied on Selling Price
+        # Collection → slab picked by Invoice Amount, rate applied on Selling Price
         gt_val = sell_price = commission = coll_fee = np.nan
         charge_method = "not_found"
 
@@ -703,8 +666,9 @@ def run_reconciliation(order_df, charges_df, sku_info_dict, pwn_dict,
             gt_val = lookup_gt(brand_name, cat, inv_amount, charges_df)
             if pd.notna(gt_val):
                 sell_price = round(inv_amount - gt_val, 5)
-                commission = lookup_commission(brand_name, cat, sell_price, charges_df)
-                coll_fee   = lookup_collection(brand_name, cat, sell_price, charges_df)
+                # Pass inv_amount for slab selection, sell_price for rate application
+                commission = lookup_commission(brand_name, cat, inv_amount, sell_price, charges_df)
+                coll_fee   = lookup_collection(brand_name, cat, inv_amount, sell_price, charges_df)
                 if pd.notna(commission) and pd.notna(coll_fee):
                     charge_method = f"{brand_name} | {cat}"
                 else:
@@ -733,17 +697,10 @@ def run_reconciliation(order_df, charges_df, sku_info_dict, pwn_dict,
             received_amount  = round(sell_price - total_charges - gst_on_charges - tds - tcs, 5)
 
         # ── Step 8: PWN lookup — CLOSED SKU takes highest priority ─────────────
-        #
-        # Priority order:
-        #   1. Manual PWN override (user entered in UI)
-        #   2. Closed SKU file — if SKU is in closed list, use that price directly
-        #   3. Normal PWN lookup (Sheet 2 / replace map)
-        #
         pwn_val    = np.nan
         match_method = "not_found"
         is_closed_sku = False
 
-        # Check manual override first
         sku_for_override = sku_for_pwn_replace.upper()
         sku_base_for_override = sku_for_pwn.upper()
         if sku_for_override in pwn_overrides:
@@ -751,7 +708,6 @@ def run_reconciliation(order_df, charges_df, sku_info_dict, pwn_dict,
         elif sku_base_for_override in pwn_overrides:
             pwn_val, match_method = float(pwn_overrides[sku_base_for_override]), "manual"
         else:
-            # Check closed SKU — try both raw_sku and corrected/stripped variants
             closed_price, found_closed = lookup_closed_sku(raw_sku, closed_sku_dict)
             if not found_closed and raw_sku != corrected_raw:
                 closed_price, found_closed = lookup_closed_sku(corrected_raw, closed_sku_dict)
@@ -763,7 +719,6 @@ def run_reconciliation(order_df, charges_df, sku_info_dict, pwn_dict,
                 match_method = "closed_sku"
                 is_closed_sku = True
             else:
-                # Normal PWN lookup
                 pwn_val, match_method = lookup_pwn(sku_for_pwn_replace, pwn_dict)
                 if match_method == "not_found" and sku_for_pwn_replace != sku_for_pwn:
                     pwn_val, match_method = lookup_pwn(sku_for_pwn, pwn_dict)
@@ -845,7 +800,7 @@ def apply_roc_sheet_style(ws, df):
     C_ALT1 = "EAF2FB"; C_ALT2 = "FFFFFF"
     C_GREEN_BG = "D6EFDD"; C_RED_BG = "FDDEDE"; C_ZERO_BG = "FFF9E6"
     C_TOTAL_BG = "1A3C5E"; C_TOTAL_FG = "FFD700"; C_BORDER = "B0C4D8"
-    C_CLOSED_BG = "EDE9FE"  # light purple for closed SKU rows
+    C_CLOSED_BG = "EDE9FE"
     thin  = Side(style="thin",   color=C_BORDER)
     thick = Side(style="medium", color="1A3C5E")
     bdr        = Border(left=thin, right=thin, top=thin, bottom=thin)
@@ -1088,7 +1043,6 @@ def build_summary(df):
         "Total Charges","Total Deductions","Received Total","Net Difference",
     ]
 
-    # Closed SKU summary
     closed_df = pd.DataFrame()
     if "Closed SKU" in df.columns:
         closed_rows = df[df["Closed SKU"] == "✅"]
@@ -1166,7 +1120,6 @@ if order_files and charges_file:
         pwn_dict      = _parse_pwn_dict(sheets[2])
         replace_map   = parse_replace_map_cached(replace_sku_file.read()) if replace_sku_file else {}
 
-        # ── Parse Closed SKU file ─────────────────────────────────────────────
         closed_sku_dict = {}
         if closed_sku_file:
             try:
@@ -1190,7 +1143,6 @@ if order_files and charges_file:
             "closed_sku_dict": closed_sku_dict,
         })
 
-    # ── Debug expanders ───────────────────────────────────────────────────────
     with st.expander("🔍 Brand & Sub-Category Detection — first 20 rows", expanded=False):
         sample = order_df[["SKU","Product"]].head(20).copy()
         sample["Brand (from Product)"] = sample["Product"].apply(extract_brand_from_product)
@@ -1201,7 +1153,6 @@ if order_files and charges_file:
             lambda r: len(_filter_brand_cat(charges_df, r["Brand (from Product)"], r["Sub-Category (found)"])), axis=1
         )
         sample["Ready"] = sample["Charge Rows"].apply(lambda x: "✅" if x > 0 else "❌")
-        # Show Closed SKU match in debug
         if closed_sku_dict:
             sample["Closed SKU?"] = sample["SKU"].apply(
                 lambda s: "✅" if lookup_closed_sku(s, closed_sku_dict)[1] else ""
@@ -1224,7 +1175,6 @@ if order_files and charges_file:
             s2 = pd.DataFrame([{"SKU": k, "PWN": v} for k, v in list(pwn_dict.items())[:15]])
             st.dataframe(s2, use_container_width=True)
 
-    # ── Closed SKU preview expander ───────────────────────────────────────────
     if closed_sku_dict:
         with st.expander(f"🔒 Closed SKU Preview — {len(closed_sku_dict):,} entries", expanded=False):
             closed_preview = pd.DataFrame([
@@ -1234,7 +1184,6 @@ if order_files and charges_file:
             st.dataframe(closed_preview, use_container_width=True, hide_index=True)
             st.caption("Showing first 30 entries. These SKUs will use the Closed Price as their PWN benchmark.")
 
-    # ── Run reconciliation ────────────────────────────────────────────────────
     with st.spinner("🔄 Running reconciliation…"):
         result_df = run_reconciliation(
             st.session_state["order_df"],
@@ -1263,9 +1212,6 @@ if order_files and charges_file:
         + (f"  |  **{len(replace_resolved):,}** PWN via Replace SKU" if len(replace_resolved) else "")
     )
 
-    # ══════════════════════════════════════════════════════════════════════════
-    # TABS
-    # ══════════════════════════════════════════════════════════════════════════
     tabs_list = ["📋  Reconciliation", "💰  Charges Summary", "📊  Category Breakdown", "🏷️  Brand Breakdown"]
     if closed_count:
         tabs_list.append("🔒  Closed SKU")
@@ -1324,7 +1270,6 @@ if order_files and charges_file:
                             st.session_state["pwn_dict"],
                             st.session_state["replace_map"]
                         )
-                        # Also check closed SKU in preview
                         cl_v, cl_found = lookup_closed_sku(existing, st.session_state["closed_sku_dict"])
                         parts = []
                         if sc_p and sc_p != "nan": parts.append(f"📦 Sub-cat: *{sc_p}*")
@@ -1371,7 +1316,6 @@ if order_files and charges_file:
                     st.session_state["sku_corrections"] = {}
                     st.rerun()
 
-        # ── KPI cards ──────────────────────────────────────────────────────────
         st.markdown('<div class="section-header">📊 Summary</div>', unsafe_allow_html=True)
         valid = result_df[result_df["Received Amount"].notna()]
         net = valid["Difference"].sum()
@@ -1398,11 +1342,9 @@ if order_files and charges_file:
             delta_color="normal" if net >= 0 else "inverse",
         )
         if closed_count:
-            nd_col2 = closed_col
-            nd_col2.metric("🔒 Closed SKU Orders", f"{closed_count:,}")
+            closed_col.metric("🔒 Closed SKU Orders", f"{closed_count:,}")
         st.markdown("---")
 
-        # ── Filters ───────────────────────────────────────────────────────────
         st.markdown('<div class="section-header">🔎 Filters</div>', unsafe_allow_html=True)
         f1, f2, f3, f4, f5 = st.columns([2, 2, 2, 2, 3])
 
@@ -1443,7 +1385,6 @@ if order_files and charges_file:
             use_container_width=True, height=500,
         )
 
-        # ── Downloads ─────────────────────────────────────────────────────────
         st.markdown('<div class="section-header">📥 Download</div>', unsafe_allow_html=True)
         d1, d2, d3 = st.columns(3)
         avail_full = [c for c in DISPLAY_COLS if c in result_df.columns]
@@ -1504,6 +1445,7 @@ if order_files and charges_file:
             "ℹ️  **Brand** → from Product name  |  "
             "**Sub-Category** → Sheet 1 SKU lookup  |  "
             "**GT** → slab on Invoice Amount  |  "
+            "**Commission & Collection %** → slab picked by Invoice Amount, applied on Selling Price  |  "
             "**Received** = Selling Price − Charges − GST − TDS − TCS  |  "
             "**Difference** = Received − (Qty × PWN)  |  "
             "🔒 **Closed SKU** → price from Closed SKU file overrides normal PWN"
@@ -1625,12 +1567,9 @@ else:
 If a SKU appears in the **Closed SKU Excel**, its price from that file is used
 as the PWN benchmark **instead** of the normal PWN lookup (Sheet 2).
 
-This is useful for discontinued/closed items where the actual settlement price
-differs from the live price list.
-
 **Priority order:**
 1. Manual override (entered in UI)
-2. **Closed SKU file ← NEW**
+2. **Closed SKU file**
 3. Normal PWN (Sheet 2 + Replace map)
 
 </div>
@@ -1648,11 +1587,11 @@ differs from the live price list.
 
 **Step 3** — Slab lookups from Sheet 0:
 
-| Charge | Input |
-|--------|-------|
-| GT | Invoice Amount |
-| Commission | Selling Price |
-| Collection | Selling Price |
+| Charge | Slab picked by | Rate applied on |
+|--------|---------------|-----------------|
+| GT | Invoice Amount | — (fixed ₹ deduction) |
+| Commission | **Invoice Amount** | **Selling Price** |
+| Collection | **Invoice Amount** | **Selling Price** |
 
 **Step 4** — Final amounts:
 ```
@@ -1664,11 +1603,6 @@ TCS             = TV × 0.5%
 Received Amount = SP − Charges − GST − TDS − TCS
 Difference      = Received − (Qty × PWN)
 ```
-
-**Range Fix (v4.0)**
-Slab boundary now uses `lo ≤ value < hi + 1`
-instead of `lo ≤ value ≤ hi + 0.99` to prevent
-adjacent-slab overlap errors.
 
 </div>
 """, unsafe_allow_html=True)
