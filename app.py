@@ -412,7 +412,7 @@ def lookup_commission(brand, cat, inv_amount, sell_price, charges_df):
         if pd.isna(lo) or pd.isna(hi) or pd.isna(ch): continue
         try:
             if float(lo) <= inv_amount <= float(hi):
-                return round(float(ch) * sell_price, 5)
+                return round((float(ch) / 100) * sell_price, 5)
         except: continue
     return np.nan
 
