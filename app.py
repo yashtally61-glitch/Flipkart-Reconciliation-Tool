@@ -619,12 +619,12 @@ def run_reconciliation(order_df, charges_df, sku_info_dict, pwn_dict,
                 sell_price = round(inv_amount - gt_val, 5)
                 commission = lookup_commission(brand_name, cat, inv_amount, sell_price, charges_df)
                 coll_fee   = lookup_collection(brand_name, cat, inv_amount, sell_price, charges_df)
-                # Fixed Fee: slab by Selling Price, returns Rs amount
                 fixed_fee_val, fixed_fee_method = lookup_fixed_fee(
                     brand_name, cat, sell_price, charges_df, fixed_fee_fallback
                 )
-                if pd.notna(commission) and pd.notna(coll_fee):
-                    charge_method = f"{brand_name} | {cat}"
+                commission = 0.0 if pd.isna(commission) else commission
+                coll_fee   = 0.0 if pd.isna(coll_fee)   else coll_fee
+                charge_method = f"{brand_name} | {cat}"
                 else:
                     gt_val = sell_price = commission = coll_fee = np.nan
                     fixed_fee_val    = float(fixed_fee_fallback)
