@@ -608,11 +608,6 @@ def run_reconciliation(order_df, charges_df, sku_info_dict, pwn_dict,
                     sku_for_pwn_replace = replace_map[_raw_upper]
 
         # ── Step 6: Slab lookups ───────────────────────────────────────────
-        gt_val = sell_price = commission = coll_fee = np.nan
-        fixed_fee_val    = float(fixed_fee_fallback)
-        fixed_fee_method = "fallback"
-        charge_method    = "not_found"
-
         if brand_name and cat:
             gt_val = lookup_gt(brand_name, cat, inv_amount, charges_df)
             if pd.notna(gt_val):
