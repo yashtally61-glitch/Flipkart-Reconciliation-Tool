@@ -620,11 +620,6 @@ def run_reconciliation(order_df, charges_df, sku_info_dict, pwn_dict,
                 commission = 0.0 if pd.isna(commission) else commission
                 coll_fee   = 0.0 if pd.isna(coll_fee)   else coll_fee
                 charge_method = f"{brand_name} | {cat}"
-                else:
-                    gt_val = sell_price = commission = coll_fee = np.nan
-                    fixed_fee_val    = float(fixed_fee_fallback)
-                    fixed_fee_method = "fallback"
-
         # ── Step 7: Final amounts ──────────────────────────────────────────
         if pd.isna(gt_val):
             sell_price = gt_val = commission = coll_fee = np.nan
