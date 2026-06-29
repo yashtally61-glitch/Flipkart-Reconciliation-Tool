@@ -428,9 +428,9 @@ def lookup_collection(brand, cat, inv_amount, sell_price, charges_df):
         except: continue
     return np.nan
 
-def lookup_fixed_fee(brand, cat, sell_price, charges_df, fallback):
+def lookup_fixed_fee(brand, cat, inv_amount, charges_df, fallback):
     """
-    Slab selection : Selling Price  (Lower Limit Fixed Fee <= SP <= Upper Limit Fixed Fee)
+    Slab selection : Invoice Amount  (Lower Limit Fixed Fee <= Invoice Amount <= Upper Limit Fixed Fee)
     Value          : Fixed Rs amount from 'Fixed Fee' column  (NOT a percentage)
     Fallback       : sidebar value when no slab row matches
 
@@ -443,7 +443,7 @@ def lookup_fixed_fee(brand, cat, sell_price, charges_df, fallback):
         if pd.isna(lo) or pd.isna(hi) or pd.isna(fee): continue
         try:
             lo_f, hi_f, fee_f = float(lo), float(hi), float(fee)
-            if lo_f <= sell_price <= hi_f:
+            if lo_f <= inv_amount <= hi_f:
                 return fee_f, f"slab({lo_f:.0f}-{hi_f:.0f})"
         except: continue
     return float(fallback), "fallback"
@@ -615,7 +615,7 @@ def run_reconciliation(order_df, charges_df, sku_info_dict, pwn_dict,
                 commission = lookup_commission(brand_name, cat, inv_amount, sell_price, charges_df)
                 coll_fee   = lookup_collection(brand_name, cat, inv_amount, sell_price, charges_df)
                 fixed_fee_val, fixed_fee_method = lookup_fixed_fee(
-                    brand_name, cat, sell_price, charges_df, fixed_fee_fallback
+                    brand_name, cat, inv_amount, charges_df, fixed_fee_fallback
                 )
                 commission = 0.0 if pd.isna(commission) else commission
                 coll_fee   = 0.0 if pd.isna(coll_fee)   else coll_fee
