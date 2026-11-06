@@ -617,7 +617,7 @@ def run_reconciliation(order_df, charges_df, sku_info_dict, pwn_dict,
             fixed_item, fixed_fee_method = lookup_fixed_fee(
                 brand_name, cat, sp_item, charges_df, fixed_fee_fallback)
 
-            if pd.isna(comm_item) and pd.isna(coll_item):
+                        if pd.isna(comm_item) and pd.isna(coll_item) and fixed_fee_method == "fallback":
                 sell_price = commission = coll_fee = np.nan
                 total_charges = gst_on_charges = taxable_value = np.nan
                 tds = tcs = total_deductions = received_amount = np.nan
