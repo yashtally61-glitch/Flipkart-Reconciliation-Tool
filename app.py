@@ -607,7 +607,7 @@ def run_reconciliation(order_df, charges_df, sku_info_dict, pwn_dict,
                 if _raw_upper in replace_map:
                     sku_for_pwn_replace = replace_map[_raw_upper]
 
-                        # ── Step 6/7: Invoice Amount = Selling Price per item ──────────────
+                                # ── Step 6/7: Invoice Amount = Selling Price per item ──────────────
         sp_item = inv_amount
         gt_val  = 0.0
 
@@ -617,7 +617,7 @@ def run_reconciliation(order_df, charges_df, sku_info_dict, pwn_dict,
             fixed_item, fixed_fee_method = lookup_fixed_fee(
                 brand_name, cat, sp_item, charges_df, fixed_fee_fallback)
 
-                        if pd.isna(comm_item) and pd.isna(coll_item) and fixed_fee_method == "fallback":
+            if pd.isna(comm_item) and pd.isna(coll_item) and fixed_fee_method == "fallback":
                 sell_price = commission = coll_fee = np.nan
                 total_charges = gst_on_charges = taxable_value = np.nan
                 tds = tcs = total_deductions = received_amount = np.nan
