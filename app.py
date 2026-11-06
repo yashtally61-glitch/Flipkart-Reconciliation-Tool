@@ -777,8 +777,8 @@ def apply_roc_sheet_style(ws, df):
         cell.font      = Font(bold=True, color=C_HEADER_FG, size=10, name="Calibri")
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         cell.border    = bdr_header
-    ws.row_dimensions[1].height = 30
-        diff_col_idx = cols.index("Difference")+1 if "Difference" in cols else None
+        ws.row_dimensions[1].height = 30
+    diff_col_idx = cols.index("Difference")+1 if "Difference" in cols else None
 
     def row_formulas(r):
         sp=C.get("Selling Price",""); inv=C.get("Invoice Amount","")
