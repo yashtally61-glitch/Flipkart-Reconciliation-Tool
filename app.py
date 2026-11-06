@@ -607,7 +607,7 @@ def run_reconciliation(order_df, charges_df, sku_info_dict, pwn_dict,
                 if _raw_upper in replace_map:
                     sku_for_pwn_replace = replace_map[_raw_upper]
 
-                # ── Step 6/7: Invoice Amount = Selling Price per item ──────────────
+                        # ── Step 6/7: Invoice Amount = Selling Price per item ──────────────
         sp_item = inv_amount
         gt_val  = 0.0
 
@@ -778,9 +778,9 @@ def apply_roc_sheet_style(ws, df):
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         cell.border    = bdr_header
     ws.row_dimensions[1].height = 30
-    diff_col_idx = cols.index("Difference")+1 if "Difference" in cols else None
+        diff_col_idx = cols.index("Difference")+1 if "Difference" in cols else None
 
-        def row_formulas(r):
+    def row_formulas(r):
         sp=C.get("Selling Price",""); inv=C.get("Invoice Amount","")
         gt=C.get("GT (As Per Calc)",""); qty=C.get("Qty","")
         com=C.get("Commission",""); colf=C.get("Collection Fee","")
