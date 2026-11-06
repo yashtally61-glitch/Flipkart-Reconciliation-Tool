@@ -607,39 +607,51 @@ def run_reconciliation(order_df, charges_df, sku_info_dict, pwn_dict,
                 if _raw_upper in replace_map:
                     sku_for_pwn_replace = replace_map[_raw_upper]
 
-        # ── Step 6: Slab lookups ───────────────────────────────────────────
-        if brand_name and cat:
-            gt_val = lookup_gt(brand_name, cat, inv_amount, charges_df)
-            if pd.notna(gt_val):
-                sell_price = round(inv_amount - gt_val, 5)
-                commission = lookup_commission(brand_name, cat, inv_amount, sell_price, charges_df)
-                coll_fee   = lookup_collection(brand_name, cat, inv_amount, sell_price, charges_df)
-                fixed_fee_val, fixed_fee_method = lookup_fixed_fee(
-                    brand_name, cat, inv_amount, charges_df, fixed_fee_fallback
-                )
-                commission = 0.0 if pd.isna(commission) else commission
-                coll_fee   = 0.0 if pd.isna(coll_fee)   else coll_fee
-                charge_method = f"{brand_name} | {cat}"
-        # ── Step 7: Final amounts ──────────────────────────────────────────
-        if pd.isna(gt_val):
-            sell_price = gt_val = commission = coll_fee = np.nan
+                # ── Step 6/7: Invoice Amount = Selling Price per item ──────────────
+        sp_item = inv_amount
+        gt_val  = 0.0
+
+        if brand_name and cat and sp_item > 0:
+            comm_item = lookup_commission(brand_name, cat, sp_item, sp_item, charges_df)
+            coll_item = lookup_collection(brand_name, cat, sp_item, sp_item, charges_df)
+            fixed_item, fixed_fee_method = lookup_fixed_fee(
+                brand_name, cat, sp_item, charges_df, fixed_fee_fallback)
+
+            if pd.isna(comm_item) and pd.isna(coll_item):
+                sell_price = commission = coll_fee = np.nan
+                total_charges = gst_on_charges = taxable_value = np.nan
+                tds = tcs = total_deductions = received_amount = np.nan
+                fixed_fee_val = float(fixed_fee_fallback) * quantity
+                charge_method = f"slab_missing|{brand_name}|{cat}"
+            else:
+                comm_item = 0.0 if pd.isna(comm_item) else comm_item
+                coll_item = 0.0 if pd.isna(coll_item) else coll_item
+                tc_item   = comm_item + coll_item + fixed_item
+                gst_item  = tc_item * gst_rate
+                tv_item   = sp_item - (sp_item / 105 * 5)
+                tds_item  = tv_item * TDS_RATE
+                tcs_item  = tv_item * TCS_RATE
+
+                sell_price       = round(sp_item * quantity, 5)
+                commission       = round(comm_item * quantity, 5)
+                coll_fee         = round(coll_item * quantity, 5)
+                fixed_fee_val    = round(fixed_item * quantity, 5)
+                total_charges    = round(tc_item * quantity, 5)
+                gst_on_charges   = round(gst_item * quantity, 5)
+                taxable_value    = round(tv_item * quantity, 5)
+                tds              = round(tds_item * quantity, 5)
+                tcs              = round(tcs_item * quantity, 5)
+                total_deductions = round(total_charges + gst_on_charges + tds + tcs, 5)
+                received_amount  = round(sell_price - total_deductions, 5)
+                charge_method    = f"{brand_name} | {cat}"
+        else:
+            sell_price = commission = coll_fee = np.nan
             total_charges = gst_on_charges = taxable_value = np.nan
             tds = tcs = total_deductions = received_amount = np.nan
-            fixed_fee_val    = float(fixed_fee_fallback)
+            fixed_fee_val    = float(fixed_fee_fallback) * quantity
             fixed_fee_method = "fallback"
-            if not brand_name:        charge_method = "no_brand_in_product"
-            elif not cat:             charge_method = f"no_subcat|brand={brand_name}"
-            else:                     charge_method = f"slab_missing|{brand_name}|{cat}"
-        else:
-            commission    = commission if pd.notna(commission) else 0.0
-            coll_fee      = coll_fee   if pd.notna(coll_fee)   else 0.0
-            total_charges    = round(commission + coll_fee + fixed_fee_val, 5)
-            gst_on_charges   = round(total_charges * gst_rate, 5)
-            taxable_value    = round(sell_price - (sell_price / 105 * 5), 5)
-            tds              = round(taxable_value * TDS_RATE, 5)
-            tcs              = round(taxable_value * TCS_RATE, 5)
-            total_deductions = round(total_charges + gst_on_charges + tds + tcs, 5)
-            received_amount  = round(sell_price - total_charges - gst_on_charges - tds - tcs, 5)
+            charge_method = ("no_brand_in_product" if not brand_name
+                             else f"no_subcat|brand={brand_name}")
 
         # ── Step 8: PWN lookup ─────────────────────────────────────────────
         pwn_val = np.nan; match_method = "not_found"; is_closed_sku = False
@@ -778,7 +790,7 @@ def apply_roc_sheet_style(ws, df):
         td=C.get("Total Deductions",""); ra=C.get("Received Amount","")
         pwn=C.get("PWN",""); pb=C.get("PWN Benchmark",""); diff=C.get("Difference","")
         fmls = {}
-        if sp and inv and gt:   fmls["Selling Price"]=f'=IF(OR({gt}{r}="",{gt}{r}=0),"",ROUND({inv}{r}-{gt}{r},2))'
+                if sp and inv and qty:  fmls["Selling Price"]=f'=IF({inv}{r}="","",ROUND({inv}{r}*{qty}{r},2))'
         if tc and com and colf: fmls["Total Charges"]=f'=IF({sp}{r}="","",ROUND({com}{r}+{colf}{r}+{ff}{r},2))'
         if gst and tc:          fmls["GST on Charges"]=f'=IF({tc}{r}="","",ROUND({tc}{r}*0.18,2))'
         if tv and sp:           fmls["Taxable Value"]=f'=IF({sp}{r}="","",ROUND({sp}{r}-{sp}{r}/105*5,2))'
