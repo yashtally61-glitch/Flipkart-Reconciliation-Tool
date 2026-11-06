@@ -780,7 +780,7 @@ def apply_roc_sheet_style(ws, df):
     ws.row_dimensions[1].height = 30
     diff_col_idx = cols.index("Difference")+1 if "Difference" in cols else None
 
-    def row_formulas(r):
+        def row_formulas(r):
         sp=C.get("Selling Price",""); inv=C.get("Invoice Amount","")
         gt=C.get("GT (As Per Calc)",""); qty=C.get("Qty","")
         com=C.get("Commission",""); colf=C.get("Collection Fee","")
@@ -790,7 +790,7 @@ def apply_roc_sheet_style(ws, df):
         td=C.get("Total Deductions",""); ra=C.get("Received Amount","")
         pwn=C.get("PWN",""); pb=C.get("PWN Benchmark",""); diff=C.get("Difference","")
         fmls = {}
-                if sp and inv and qty:  fmls["Selling Price"]=f'=IF({inv}{r}="","",ROUND({inv}{r}*{qty}{r},2))'
+        if sp and inv and qty:  fmls["Selling Price"]=f'=IF({inv}{r}="","",ROUND({inv}{r}*{qty}{r},2))'
         if tc and com and colf: fmls["Total Charges"]=f'=IF({sp}{r}="","",ROUND({com}{r}+{colf}{r}+{ff}{r},2))'
         if gst and tc:          fmls["GST on Charges"]=f'=IF({tc}{r}="","",ROUND({tc}{r}*0.18,2))'
         if tv and sp:           fmls["Taxable Value"]=f'=IF({sp}{r}="","",ROUND({sp}{r}-{sp}{r}/105*5,2))'
